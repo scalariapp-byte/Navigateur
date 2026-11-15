@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "Navigateur",
+  "version": "1.0.0",
+  "description": "Apps organisées en groupes + coffre de mots de passe chiffré (AES-256-GCM).",
+  "permissions": ["storage", "alarms", "favicon", "search"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "bg.js", "type": "module" },
+  "action": { "default_popup": "popup.html", "default_title": "Navigateur" },
+  "chrome_url_overrides": { "newtab": "newtab.html" },
+  "content_scripts": [{ "matches": ["http://*/*", "https://*/*"], "js": ["content.js"], "run_at": "document_idle" }]
+}
