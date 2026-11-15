@@ -101,5 +101,5 @@ class Store(private val dir: File) {
         cur.save()
     }
     fun switch(p: Profile) { cur.save(); cur = ProfileData(p, dir); save() }
-    fun delete(p: Profile) { profiles.remove(p); File(dir, "p_${p.id}.json").delete(); File(dir, "pw_${p.id}.bin").delete(); save() }
+    fun delete(p: Profile) { profiles.remove(p); File(dir, "p_${p.id}.json").delete(); File(dir, "pw_${p.id}.bin").delete(); File(dir, "av_${p.id}.jpg").delete(); save() }
 }
