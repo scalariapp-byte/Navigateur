@@ -52,6 +52,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.drawerlayout.widget.DrawerLayout
 import androidx.webkit.ProfileStore
+import androidx.webkit.UserAgentMetadata
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
@@ -539,6 +540,20 @@ span{max-width:74px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}</
 <h1>$hello, ${esc(d.p.name)}</h1><p>${esc(d.p.email.ifEmpty { "Que voulez-vous explorer ?" })}</p><div class=g>$tiles</div>"""
     }
 
+    /** Google refuse la connexion s'il détecte une WebView : on masque l'en-tête X-Requested-With et la marque « Android WebView ». */
+    private fun hideWebView(st: WebSettings) {
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.REQUESTED_WITH_HEADER_ALLOW_LIST))
+            WebSettingsCompat.setRequestedWithHeaderOriginAllowList(st, emptySet())
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.USER_AGENT_METADATA)) runCatching {
+            val m = WebSettingsCompat.getUserAgentMetadata(st)
+            val brands = m.brandVersionList.map { b ->
+                if (b.brand.contains("WebView")) UserAgentMetadata.BrandVersion.Builder().setBrand("Google Chrome")
+                    .setMajorVersion(b.majorVersion).setFullVersion(b.fullVersion).build() else b
+            }
+            WebSettingsCompat.setUserAgentMetadata(st, UserAgentMetadata.Builder(m).setBrandVersionList(brands).build())
+        }
+    }
+
     private fun applyDark(w: WebView) {
         if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) WebSettingsCompat.setAlgorithmicDarkeningAllowed(w.settings, darkSites)
     }
@@ -553,6 +568,7 @@ span{max-width:74px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}</
         if (t.priv) settings.cacheMode = WebSettings.LOAD_NO_CACHE
         // Retire le marqueur WebView : sinon Google refuse souvent la connexion au compte.
         settings.userAgentString = settings.userAgentString.replace("; wv", "").replace(Regex("Version/\\S+ "), "")
+        hideWebView(settings)
         applyDark(this)
         addJavascriptInterface(Bridge(t), "NV")
         webViewClient = object : WebViewClient() {
