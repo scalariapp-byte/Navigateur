@@ -1,18 +1,19 @@
-# Navigateur — extension Chrome
+# Navigateur (Android)
 
-Remplace la page Nouvel onglet par :
-- **Apps** : vos sites rangés en groupes (ajout `+`, clic droit = retirer, ✎ renommer, ↑ réordonner). Synchronisés entre vos Chrome via votre compte Google.
-- **Mots de passe** : coffre chiffré localement (PBKDF2-SHA256 600 000 itérations → AES-256-GCM). Recherche, générateur, export/import du fichier chiffré.
+Navigateur Android basé sur le moteur de Chrome (Android System WebView).
 
-Icône de l'extension : remplir/copier l'identifiant du site courant, enregistrer un identifiant capturé à la connexion (badge `+`), générer un mot de passe.
+- **Profils** : chacun a son nom, son e-mail, sa couleur et ses cookies/sessions isolés (deux comptes Gmail connectés en parallèle). Chaque profil a ses propres onglets, groupes, favoris, historique et mots de passe.
+- **Groupes d'onglets** : créer, renommer, recolorer, déplacer un onglet (⇄), fermer ou dissocier un groupe. La bordure du compteur d'onglets prend la couleur du groupe actif.
+- **Onglets privés** (🕶) : rien dans l'historique, cookies effacés à la fermeture du dernier onglet privé.
+- **Historique contrôlé** : « Ne jamais enregistrer ce site » + règles par site ou mot-clé (les recherches contenant ce mot sont aussi exclues, et l'historique existant est purgé).
+- **Favoris**, affichés sur la page Nouvel onglet.
+- **Mots de passe** chiffrés (AES-256-GCM, clé du Keystore Android), protégés par le verrouillage de l'appareil, proposés à l'enregistrement quand vous vous connectez, remplissage via ⋮ → Remplir.
 
-## Installation
-1. `chrome://extensions` → activer **Mode développeur**
-2. **Charger l'extension non empaquetée** → dossier `extension/`
-3. Ouvrir un nouvel onglet → onglet *Mots de passe* → créer le mot de passe maître (12+ caractères, **irrécupérable si oublié**).
+## Obtenir l'APK
+Onglet **Actions** du dépôt GitHub → dernier run « APK » → artefact **Navigateur-apk** → dézipper → installer `app-debug.apk` sur le téléphone (autoriser les sources inconnues).
 
-## Sécurité
-- Seul le chiffré est écrit sur disque. La clé déverrouillée reste en RAM (`storage.session`), inaccessible aux pages web ; verrouillage auto après 15 min d'inactivité et à la fermeture de Chrome.
-- Les pages web ne peuvent que *proposer* un identifiant ; lister/lire le coffre est réservé aux pages de l'extension.
-- Le remplissage est manuel (clic) et vérifie que le domaine correspond exactement.
-- Désactivez le gestionnaire intégré de Chrome (`chrome://password-manager/settings`) pour éviter les doubles propositions.
+## Limites
+- Android uniquement (iOS impose WebKit).
+- Ne touche pas à l'application Chrome : son historique et ses mots de passe restent séparés.
+- Profils isolés seulement si Android System WebView ≥ 110 environ (l'app prévient sinon).
+- Google peut refuser la connexion à un compte dans une WebView malgré le contournement du user-agent.
