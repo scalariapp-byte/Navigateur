@@ -1,0 +1,7 @@
+<resources>
+    <style name="Hub" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/bg</item>
+    </style>
+    <color name="bg">#0A0A0F</color>
+    <color name="brand">#7C3AED</color>
+</resources>
