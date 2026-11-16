@@ -12,8 +12,8 @@ jobs:
       - uses: actions/setup-java@v5
         with: { distribution: temurin, java-version: 17 }
       - uses: gradle/actions/setup-gradle@v5
-        with: { gradle-version: "8.9" }
-      - run: gradle assembleDebug --no-daemon && cp app/build/outputs/apk/debug/app-debug.apk Navigateur.apk
+        with: { gradle-version: "8.13" }
+      - run: gradle assembleDebug --no-daemon && (gradle -q :app:dependencies --configuration debugRuntimeClasspath | grep -m1 geckoview || true) && cp app/build/outputs/apk/debug/app-debug.apk Navigateur.apk
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: latest

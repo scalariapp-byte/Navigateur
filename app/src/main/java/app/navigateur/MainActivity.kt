@@ -1,6 +1,5 @@
 package app.navigateur
 
-import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.Dialog
 import android.app.DownloadManager
@@ -32,15 +31,7 @@ import android.view.Window
 import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
-import android.webkit.CookieManager
-import android.webkit.JavascriptInterface
 import android.webkit.URLUtil
-import android.webkit.ValueCallback
-import android.webkit.WebChromeClient
-import android.webkit.WebResourceRequest
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
@@ -51,23 +42,32 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.drawerlayout.widget.DrawerLayout
-import androidx.webkit.ProfileStore
-import androidx.webkit.UserAgentMetadata
-import androidx.webkit.WebSettingsCompat
-import androidx.webkit.WebViewCompat
-import androidx.webkit.WebViewFeature
-import org.json.JSONObject
+import org.mozilla.geckoview.AllowOrDeny
+import org.mozilla.geckoview.Autocomplete
+import org.mozilla.geckoview.GeckoResult
+import org.mozilla.geckoview.GeckoRuntime
+import org.mozilla.geckoview.GeckoRuntimeSettings
+import org.mozilla.geckoview.GeckoSession
+import org.mozilla.geckoview.GeckoSession.PromptDelegate
+import org.mozilla.geckoview.GeckoSession.PromptDelegate.PromptResponse
+import org.mozilla.geckoview.GeckoSessionSettings
+import org.mozilla.geckoview.GeckoView
+import org.mozilla.geckoview.WebResponse
 import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
 import java.net.URLDecoder
 import java.net.URLEncoder
 import java.security.SecureRandom
 import java.util.Calendar
 
 private const val HOME = "nv:home"
-private const val PRIV = "nv_private"
+private val INTERNAL = setOf("http", "https", "about", "data", "blob", "javascript", "resource", "moz-extension")
 
 class MainActivity : Activity() {
     private lateinit var s: Store
+    private lateinit var rt: GeckoRuntime
+    private lateinit var gv: GeckoView
     private lateinit var drawer: DrawerLayout
     private lateinit var leftCol: LinearLayout
     private lateinit var rightCol: LinearLayout
@@ -77,12 +77,16 @@ class MainActivity : Activity() {
     private lateinit var box: FrameLayout
     private lateinit var prog: ProgressBar
     private lateinit var tabsBtn: TextView
-    private val views = HashMap<String, WebView>()
+    private lateinit var top: View
+    private lateinit var bottom: View
+    private lateinit var handle: View
+    private val sessions = HashMap<String, GeckoSession>()
+    private val canBack = HashSet<String>()
+    private val canFwd = HashSet<String>()
     private val icons = HashMap<String, Bitmap?>()
-    private var fileCb: ValueCallback<Array<Uri>>? = null
-    private var lastCap = ""
+    private val fetching = HashSet<String>()
+    private var filePrompt: Pair<PromptDelegate.FilePrompt, (PromptResponse) -> Unit>? = null
     private var pendingPhoto: String? = null
-    private val multi by lazy { WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE) }
     private val icDir by lazy { File(filesDir, "ic").apply { mkdirs() } }
     private val prefs by lazy { getSharedPreferences("nv", MODE_PRIVATE) }
     private var darkSites: Boolean
@@ -90,8 +94,9 @@ class MainActivity : Activity() {
         set(v) { prefs.edit().putBoolean("dark", v).apply() }
     private val d get() = s.cur
     private val tab get() = d.tabs.firstOrNull { it.id == d.current }
-    private val web get() = tab?.let { views[it.id] }
+    private val sess get() = tab?.let { sessions[it.id] }
     private val accent get() = d.p.color
+    private fun scheme() = if (darkSites) GeckoRuntimeSettings.COLOR_SCHEME_DARK else GeckoRuntimeSettings.COLOR_SCHEME_SYSTEM
 
     // ---------- Petits utilitaires UI ----------
     private fun px(v: Int) = (v * resources.displayMetrics.density).toInt()
@@ -99,7 +104,6 @@ class MainActivity : Activity() {
     private fun host(u: String?) = Uri.parse(u ?: "").host?.removePrefix("www.") ?: ""
     private fun dec(u: String) = runCatching { URLDecoder.decode(u, "UTF-8") }.getOrDefault(u)
     private fun esc(v: String) = TextUtils.htmlEncode(v)
-    private fun profName(t: Tab) = if (t.priv) PRIV else "nv_" + d.p.id
     private fun gen() = SecureRandom().let { r -> (1..20).map { CHARS[r.nextInt(CHARS.length)] }.joinToString("") }
     private fun lp(w: Int, h: Int, weight: Float = 0f) = LinearLayout.LayoutParams(w, h, weight)
     private fun circle(c: Int) = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(c) }
@@ -142,7 +146,7 @@ class MainActivity : Activity() {
     }
 
     // ---------- Fenêtres modernes (bas d'écran) ----------
-    inner class Sheet(title: String, private val build: Sheet.() -> Unit) {
+    inner class Sheet(title: String, onDismiss: (() -> Unit)?, private val build: Sheet.() -> Unit) {
         private val dlg = Dialog(this@MainActivity)
         private val chips = LinearLayout(this@MainActivity)
         private val list = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL }
@@ -158,6 +162,7 @@ class MainActivity : Activity() {
             }
             dlg.requestWindowFeature(Window.FEATURE_NO_TITLE)
             dlg.setContentView(col)
+            onDismiss?.let { f -> dlg.setOnDismissListener { f() } }
             reload(); dlg.show()
             dlg.window?.apply {
                 setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT)); setLayout(-1, -2); setGravity(Gravity.BOTTOM)
@@ -199,10 +204,11 @@ class MainActivity : Activity() {
         }
         fun empty(msg: String) { list.addView(txt(msg, 14f, MUT).apply { setPadding(px(10), px(16), px(10), px(16)) }) }
     }
-    private fun sheet(title: String, build: Sheet.() -> Unit) { Sheet(title, build) }
+    private fun sheet(title: String, onDismiss: (() -> Unit)? = null, build: Sheet.() -> Unit) { Sheet(title, onDismiss, build) }
 
-    private fun ask(title: String, vararg fields: Pair<String, String>, msg: String? = null, ok: String = "OK", f: (List<String>) -> Unit) {
+    private fun ask(title: String, vararg fields: Pair<String, String>, msg: String? = null, ok: String = "OK", cancel: (() -> Unit)? = null, f: (List<String>) -> Unit) {
         val dlg = Dialog(this)
+        var okd = false
         val es = fields.map { (h, v) ->
             EditText(this).apply {
                 hint = h; setText(v); isSingleLine = true; setTextColor(TXT); setHintTextColor(MUT); textSize = 15f
@@ -219,11 +225,13 @@ class MainActivity : Activity() {
                 addView(txt("Annuler", 15f, MUT, true).apply { setPadding(px(16), px(10), px(16), px(10)); setOnClickListener { dlg.dismiss() } })
                 addView(txt(ok, 15f, Color.WHITE, true).apply {
                     setPadding(px(22), px(10), px(22), px(10)); background = ripple(rr(accent, 22))
-                    setOnClickListener { dlg.dismiss(); f(es.map { e -> e.text.toString().trim() }) }
+                    setOnClickListener { okd = true; dlg.dismiss(); f(es.map { e -> e.text.toString().trim() }) }
                 })
             })
         }
-        dlg.requestWindowFeature(Window.FEATURE_NO_TITLE); dlg.setContentView(col); dlg.show()
+        dlg.requestWindowFeature(Window.FEATURE_NO_TITLE); dlg.setContentView(col)
+        dlg.setOnDismissListener { if (!okd) cancel?.invoke() }
+        dlg.show()
         dlg.window?.apply {
             setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT)); setLayout(resources.displayMetrics.widthPixels - px(36), -2)
             if (es.isNotEmpty()) setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
@@ -241,6 +249,9 @@ class MainActivity : Activity() {
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
         s = Store(filesDir)
+        rt = runtime ?: GeckoRuntime.create(applicationContext, GeckoRuntimeSettings.Builder()
+            .preferredColorScheme(scheme()).loginAutofillEnabled(true).build()).also { runtime = it }
+        rt.autocompleteStorageDelegate = Storage()
         window.statusBarColor = BG; window.navigationBarColor = SURF
         avatarBox = FrameLayout(this).apply { setOnClickListener { profiles() } }
         lockIc = ImageView(this)
@@ -256,9 +267,9 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL; background = rr(SURF2, 24); setPadding(px(14), 0, px(2), 0)
             addView(lockIc, lp(px(17), px(17)))
             addView(addr, lp(0, -1, 1f))
-            addView(icon(I.REFRESH, MUT, 11) { web?.reload() }, lp(px(42), px(42)))
+            addView(icon(I.REFRESH, MUT, 11) { sess?.reload() }, lp(px(42), px(42)))
         }
-        val top = LinearLayout(this).apply {
+        top = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL; setPadding(px(12), px(8), px(12), px(8)); setBackgroundColor(BG)
             addView(avatarBox, lp(px(40), px(40)).apply { rightMargin = px(10) })
             addView(pill, lp(0, px(46), 1f))
@@ -266,9 +277,10 @@ class MainActivity : Activity() {
         prog = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 100; progressBackgroundTintList = ColorStateList.valueOf(BG)
         }
-        box = FrameLayout(this).apply { setBackgroundColor(BG) }
+        gv = GeckoView(this).apply { coverUntilFirstPaint(BG) }
+        box = FrameLayout(this).apply { setBackgroundColor(BG); addView(gv, -1, -1) }
         val r = px(16).toFloat()
-        val handle = ImageView(this).apply {
+        handle = ImageView(this).apply {
             setImageDrawable(Ic(I.STAR, TXT)); setPadding(px(5), px(24), px(3), px(24))
             background = GradientDrawable().apply { setColor(0xCC22262E.toInt()); cornerRadii = floatArrayOf(r, r, 0f, 0f, 0f, 0f, r, r) }
             setOnClickListener { drawer.openDrawer(Gravity.END) }
@@ -278,12 +290,12 @@ class MainActivity : Activity() {
             addView(handle, FrameLayout.LayoutParams(px(24), px(72), Gravity.END or Gravity.CENTER_VERTICAL))
         }
         tabsBtn = txt("", 12f, TXT, true).apply { gravity = Gravity.CENTER }
-        val bottom = LinearLayout(this).apply {
+        bottom = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL; setBackgroundColor(SURF); setPadding(px(4), 0, px(4), 0)
             fun slot(v: View) = addView(v, lp(0, px(56), 1f))
             slot(icon(I.MENU, TXT, 16) { drawer.openDrawer(Gravity.START) })
-            slot(icon(I.BACK, TXT, 16) { web?.takeIf { it.canGoBack() }?.goBack() })
-            slot(icon(I.FWD, TXT, 16) { web?.takeIf { it.canGoForward() }?.goForward() })
+            slot(icon(I.BACK, TXT, 16) { if (tab?.id in canBack) sess?.goBack() })
+            slot(icon(I.FWD, TXT, 16) { if (tab?.id in canFwd) sess?.goForward() })
             slot(icon(I.HOME, TXT, 16) { goHome() })
             slot(FrameLayout(context).apply {
                 background = RippleDrawable(ColorStateList.valueOf(0x33FFFFFF), null, null)
@@ -309,8 +321,6 @@ class MainActivity : Activity() {
             addView(panel(rightCol, false), DrawerLayout.LayoutParams(px(304), -1, Gravity.END))
         }
         setContentView(drawer)
-        clearPriv()
-        if (!multi) toast("WebView trop ancien : les profils partagent les cookies. Mettez à jour « Android System WebView ».")
         intent?.dataString?.let { newTab(it) } ?: refresh()
     }
 
@@ -318,11 +328,19 @@ class MainActivity : Activity() {
     override fun onPause() { super.onPause(); s.save() }
     @Suppress("OVERRIDE_DEPRECATION")
     override fun onBackPressed() {
-        if (drawer.isDrawerOpen(Gravity.START) || drawer.isDrawerOpen(Gravity.END)) drawer.closeDrawers()
-        else web?.takeIf { it.canGoBack() }?.goBack() ?: super.onBackPressed()
+        when {
+            drawer.isDrawerOpen(Gravity.START) || drawer.isDrawerOpen(Gravity.END) -> drawer.closeDrawers()
+            top.visibility != View.VISIBLE -> sess?.exitFullScreen()
+            tab?.id in canBack -> sess?.goBack()
+            else -> super.onBackPressed()
+        }
     }
     @Deprecated("") override fun onActivityResult(rc: Int, res: Int, data: Intent?) {
-        if (rc == 2) { fileCb?.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(res, data)); fileCb = null }
+        if (rc == 2) filePrompt?.let { (p, done) ->
+            filePrompt = null
+            val uris = data?.clipData?.let { c -> (0 until c.itemCount).map { c.getItemAt(it).uri } } ?: listOfNotNull(data?.data)
+            done(when { res != RESULT_OK || uris.isEmpty() -> p.dismiss(); uris.size == 1 -> p.confirm(this, uris[0]); else -> p.confirm(this, uris.toTypedArray()) })
+        }
         if (rc == 3 && res == RESULT_OK) passwords(true)
         if (rc == 4 && res == RESULT_OK) data?.data?.let { savePhoto(it) }
     }
@@ -330,8 +348,8 @@ class MainActivity : Activity() {
     private fun refresh() {
         if (d.tabs.isEmpty()) return newTab()
         val t = tab ?: d.tabs.last().also { d.current = it.id }
-        val w = views.getOrPut(t.id) { makeWeb(t) }
-        if (w.parent != box) { box.removeAllViews(); box.addView(w) }
+        val se = session(t)
+        if (gv.session != se) { gv.releaseSession(); gv.setSession(se) }
         showAddr(addr.hasFocus())
         tabsBtn.text = d.tabs.size.toString()
         tabsBtn.background = rr(Color.TRANSPARENT, 7, 2, d.groups.firstOrNull { it.id == t.group }?.color ?: TXT)
@@ -378,11 +396,219 @@ class MainActivity : Activity() {
         item(I.TABS, "Onglets et groupes", "${d.tabs.size} onglet(s) · ${d.groups.size} groupe(s)") { tabs() }
         item(I.HISTORY, "Historique") { history() }
         item(I.KEY, "Mots de passe", "${d.creds.size} enregistré(s)") { passwords() }
-        item(I.PERSON, "Remplir l'identifiant", host(tab?.url).ifEmpty { null }) { fill() }
         item(I.BLOCK, "Ne jamais enregistrer ce site") { addExclusion(host(tab?.url)) }
         item(I.EDIT, "Règles d'exclusion", "${d.exclusions.size} règle(s)") { exclusions() }
         item(I.SHARE, "Partager la page") { share() }
-        item(I.MOON, "Sites en mode sombre", if (darkSites) "Activé" else "Désactivé") { darkSites = !darkSites; views.values.forEach { applyDark(it) }; buildLeft() }
+        item(I.MOON, "Sites en mode sombre", if (darkSites) "Activé" else "Selon le système") {
+            darkSites = !darkSites; rt.settings.setPreferredColorScheme(scheme()); buildLeft()
+        }
+    }
+
+    // ---------- Onglets ----------
+    private fun newTab(u: String = HOME, g: String? = tab?.group, priv: Boolean = false) {
+        val t = Tab(uid(), u, "Nouvel onglet", g, priv)
+        d.tabs += t; d.current = t.id; refresh()
+        if (u == HOME) addr.requestFocus()
+    }
+
+    private fun closeTab(t: Tab) {
+        sessions.remove(t.id)?.let { if (gv.session == it) gv.releaseSession(); it.close() }
+        d.tabs.remove(t)
+        if (d.current == t.id) d.current = d.tabs.lastOrNull()?.id
+        refresh()
+    }
+
+    private fun go(q: String) {
+        val v = q.trim(); if (v.isEmpty()) return
+        val u = when {
+            v.startsWith("http://") || v.startsWith("https://") -> v
+            !v.contains(' ') && v.contains('.') -> "https://$v"
+            else -> "https://www.google.com/search?q=" + URLEncoder.encode(v, "UTF-8")
+        }
+        open(u); addr.clearFocus()
+        getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(addr.windowToken, 0)
+    }
+
+    private fun open(u: String) { sess?.loadUri(u) }
+
+    private fun goHome() {
+        val t = tab ?: return
+        t.url = HOME; t.title = "Nouvel onglet"
+        sess?.loadString(homeHtml(), "text/html"); showAddr(false)
+    }
+
+    private fun share() {
+        tab?.url?.takeIf { it.startsWith("http") }?.let {
+            startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, it), null))
+        }
+    }
+
+    // ---------- Moteur Gecko ----------
+    private fun session(t: Tab): GeckoSession = sessions.getOrPut(t.id) {
+        GeckoSession(GeckoSessionSettings.Builder().contextId(if (t.priv) null else "nv_" + d.p.id).usePrivateMode(t.priv).build()).apply {
+            navigationDelegate = object : GeckoSession.NavigationDelegate {
+                override fun onLocationChange(session: GeckoSession, url: String?, perms: MutableList<GeckoSession.PermissionDelegate.ContentPermission>, hasUserGesture: Boolean) {
+                    if (url == null || !url.startsWith("http")) return
+                    t.url = url; record(t, url)
+                    if (t.id == d.current && !addr.hasFocus()) showAddr(false)
+                }
+                override fun onCanGoBack(session: GeckoSession, can: Boolean) { if (can) canBack += t.id else canBack -= t.id }
+                override fun onCanGoForward(session: GeckoSession, can: Boolean) { if (can) canFwd += t.id else canFwd -= t.id }
+                override fun onLoadRequest(session: GeckoSession, request: GeckoSession.NavigationDelegate.LoadRequest): GeckoResult<AllowOrDeny>? {
+                    val u = request.uri
+                    if (u.substringBefore(':').lowercase() in INTERNAL) return GeckoResult.allow()
+                    runCatching {
+                        startActivity(if (u.startsWith("intent:")) Intent.parseUri(u, Intent.URI_INTENT_SCHEME).apply {
+                            addCategory(Intent.CATEGORY_BROWSABLE); component = null; selector = null
+                        } else Intent(Intent.ACTION_VIEW, Uri.parse(u)))
+                    }
+                    return GeckoResult.deny()
+                }
+                override fun onNewSession(session: GeckoSession, uri: String): GeckoResult<GeckoSession>? { newTab(uri, priv = t.priv); return null }
+            }
+            progressDelegate = object : GeckoSession.ProgressDelegate {
+                override fun onProgressChange(session: GeckoSession, progress: Int) {
+                    if (t.id == d.current) { prog.progress = progress; prog.visibility = if (progress < 100) View.VISIBLE else View.INVISIBLE }
+                }
+                override fun onPageStop(session: GeckoSession, success: Boolean) { if (success && !t.priv && !excluded(t.url)) fetchIcon(host(t.url)) }
+            }
+            contentDelegate = object : GeckoSession.ContentDelegate {
+                override fun onTitleChange(session: GeckoSession, title: String?) {
+                    if (title.isNullOrBlank() || !t.url.startsWith("http")) return
+                    t.title = title
+                    val h = d.history.firstOrNull()
+                    if (h != null && h.url == t.url && !t.priv) { if (excluded(t.url, title)) d.history.removeAt(0) else h.title = title }
+                }
+                override fun onFullScreen(session: GeckoSession, fullScreen: Boolean) {
+                    val v = if (fullScreen) View.GONE else View.VISIBLE
+                    top.visibility = v; bottom.visibility = v; handle.visibility = v; prog.visibility = v
+                }
+                override fun onContextMenu(session: GeckoSession, screenX: Int, screenY: Int, element: GeckoSession.ContentDelegate.ContextElement) {
+                    val link = element.linkUri; val img = element.srcUri
+                    if (link == null && img == null) return
+                    sheet(link ?: img ?: "") {
+                        link?.let { l ->
+                            row(ic(I.OPEN), "Ouvrir dans un nouvel onglet") { close(); newTab(l, priv = t.priv) }
+                            row(ic(I.PRIVATE), "Ouvrir dans un onglet privé") { close(); newTab(l, priv = true) }
+                            row(ic(I.COPY), "Copier le lien") { close(); copy(l) }
+                            row(ic(I.STAR), "Ajouter aux favoris") { close(); d.bookmarks += Entry(element.title ?: element.linkUri ?: l, l); buildRight() }
+                        }
+                        img?.let { i -> row(ic(I.PHOTO), "Ouvrir l'image") { close(); newTab(i, priv = t.priv) } }
+                    }
+                }
+                override fun onExternalResponse(session: GeckoSession, response: WebResponse) {
+                    val hd = response.headers.entries.associate { it.key.lowercase() to it.value }
+                    runCatching {
+                        val r = DownloadManager.Request(Uri.parse(response.uri)).setMimeType(hd["content-type"])
+                            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                            .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, URLUtil.guessFileName(response.uri, hd["content-disposition"], hd["content-type"]))
+                        getSystemService(DownloadManager::class.java).enqueue(r); toast("Téléchargement…")
+                    }.onFailure { toast("Échec du téléchargement") }
+                }
+            }
+            promptDelegate = Prompts(t)
+            open(rt)
+            if (t.url == HOME) loadString(homeHtml(), "text/html") else loadUri(t.url)
+        }
+    }
+
+    /** Résultat asynchrone complété une seule fois (OK ou annulation). */
+    private fun <T> later(start: ((T) -> Unit) -> Unit): GeckoResult<T> {
+        val r = GeckoResult<T>(); var done = false
+        start { if (!done) { done = true; r.complete(it) } }
+        return r
+    }
+
+    /** Fenêtres des pages : alertes, confirmations, listes déroulantes, fichiers, mots de passe. */
+    inner class Prompts(private val t: Tab) : PromptDelegate {
+        override fun onAlertPrompt(session: GeckoSession, prompt: PromptDelegate.AlertPrompt): GeckoResult<PromptResponse>? = later { done ->
+            ask(prompt.title ?: host(t.url), msg = prompt.message, cancel = { done(prompt.dismiss()) }) { done(prompt.dismiss()) }
+        }
+        override fun onButtonPrompt(session: GeckoSession, prompt: PromptDelegate.ButtonPrompt): GeckoResult<PromptResponse>? = later { done ->
+            ask(prompt.title ?: host(t.url), msg = prompt.message, cancel = { done(prompt.confirm(PromptDelegate.ButtonPrompt.Type.NEGATIVE)) }) {
+                done(prompt.confirm(PromptDelegate.ButtonPrompt.Type.POSITIVE))
+            }
+        }
+        override fun onTextPrompt(session: GeckoSession, prompt: PromptDelegate.TextPrompt): GeckoResult<PromptResponse>? = later { done ->
+            ask(prompt.title ?: host(t.url), "" to (prompt.defaultValue ?: ""), msg = prompt.message, cancel = { done(prompt.dismiss()) }) { (v) -> done(prompt.confirm(v)) }
+        }
+        override fun onChoicePrompt(session: GeckoSession, prompt: PromptDelegate.ChoicePrompt): GeckoResult<PromptResponse>? = later { done ->
+            val all = prompt.choices.flatMap { c -> if (c.items != null) listOf(c) + c.items!!.toList() else listOf(c) }
+            val multi = prompt.type == PromptDelegate.ChoicePrompt.Type.MULTIPLE
+            val picked = all.filter { it.selected }.map { it.id }.toMutableSet()
+            sheet(prompt.title ?: "Choisir", onDismiss = { done(if (multi) prompt.confirm(picked.toTypedArray()) else prompt.dismiss()) }) {
+                all.forEach { c ->
+                    when {
+                        c.separator -> {}
+                        c.items != null -> header(c.label, MUT)
+                        else -> row(if (c.id in picked) ic(I.CHECK, accent) else null, c.label, bold = c.id in picked) {
+                            if (c.disabled) return@row
+                            if (multi) { if (!picked.remove(c.id)) picked += c.id; reload() } else { done(prompt.confirm(c)); close() }
+                        }
+                    }
+                }
+            }
+        }
+        override fun onFilePrompt(session: GeckoSession, prompt: PromptDelegate.FilePrompt): GeckoResult<PromptResponse>? = later { done ->
+            filePrompt = prompt to done
+            val i = Intent(Intent.ACTION_GET_CONTENT).addCategory(Intent.CATEGORY_OPENABLE)
+                .setType(prompt.mimeTypes?.singleOrNull() ?: "*/*")
+                .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, prompt.type == PromptDelegate.FilePrompt.Type.MULTIPLE)
+            prompt.mimeTypes?.takeIf { it.size > 1 }?.let { i.putExtra(Intent.EXTRA_MIME_TYPES, it) }
+            runCatching { @Suppress("DEPRECATION") startActivityForResult(i, 2) }.onFailure { filePrompt = null; done(prompt.dismiss()) }
+        }
+        override fun onPopupPrompt(session: GeckoSession, prompt: PromptDelegate.PopupPrompt): GeckoResult<PromptResponse>? =
+            GeckoResult.fromValue(prompt.confirm(AllowOrDeny.ALLOW))
+        override fun onLoginSave(session: GeckoSession, request: PromptDelegate.AutocompleteRequest<Autocomplete.LoginSaveOption>): GeckoResult<PromptResponse>? {
+            val opt = request.options.firstOrNull() ?: return null
+            if (t.priv) return GeckoResult.fromValue(request.dismiss())
+            val l = opt.value
+            return later { done ->
+                ask("Enregistrer le mot de passe ?", msg = "${host(l.origin)}\n${l.username ?: "(sans identifiant)"}\nProfil : ${d.p.name}",
+                    ok = "Enregistrer", cancel = { done(request.dismiss()) }) { done(request.confirm(opt)) }
+            }
+        }
+        override fun onLoginSelect(session: GeckoSession, request: PromptDelegate.AutocompleteRequest<Autocomplete.LoginSelectOption>): GeckoResult<PromptResponse>? = later { done ->
+            sheet("Quel compte ?", onDismiss = { done(request.dismiss()) }) {
+                request.options.forEach { o -> row(siteIcon(host(o.value.origin), 36), o.value.username ?: "(sans identifiant)", host(o.value.origin)) { done(request.confirm(o)); close() } }
+            }
+        }
+    }
+
+    /** Coffre du profil actif branché sur le remplissage automatique de Gecko. */
+    inner class Storage : Autocomplete.StorageDelegate {
+        override fun onLoginFetch(domain: String): GeckoResult<Array<Autocomplete.LoginEntry>>? =
+            GeckoResult.fromValue(d.creds.filter { it.host == domain || it.host.endsWith(".$domain") || domain.endsWith(".${it.host}") }.map {
+                Autocomplete.LoginEntry.Builder().origin("https://${it.host}").formActionOrigin("https://${it.host}")
+                    .username(it.user).password(it.pass).guid(it.host + "|" + it.user).build()
+            }.toTypedArray())
+        override fun onLoginSave(login: Autocomplete.LoginEntry) {
+            val h = host(login.origin); val u = login.username ?: ""; val p = login.password ?: return
+            if (h.isEmpty()) return
+            runOnUiThread { d.creds.removeAll { it.host == h && it.user == u }; d.creds += Cred(h, u, p); d.saveCreds(); buildLeft() }
+        }
+    }
+
+    private fun fetchIcon(h: String) {
+        if (h.isEmpty() || h in fetching || File(icDir, "$h.png").exists()) return
+        fetching += h
+        Thread {
+            runCatching {
+                val c = URL("https://$h/favicon.ico").openConnection() as HttpURLConnection
+                c.connectTimeout = 5000; c.readTimeout = 5000
+                val b = c.inputStream.use { BitmapFactory.decodeStream(it) }!!
+                File(icDir, "$h.png").outputStream().use { b.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                runOnUiThread { icons[h] = b; buildRight() }
+            }
+        }.start()
+    }
+
+    private fun switchTo(p: Profile) {
+        if (p.id == d.p.id) return
+        gv.releaseSession()
+        sessions.values.forEach { it.close() }
+        sessions.clear(); canBack.clear(); canFwd.clear()
+        s.switch(p); refresh(); toast("Profil : ${p.name}")
     }
 
     // ---------- Tiroir droit : favoris ----------
@@ -433,25 +659,6 @@ class MainActivity : Activity() {
         }
     }
 
-    // ---------- Onglets et groupes ----------
-    private fun newTab(u: String = HOME, g: String? = tab?.group, priv: Boolean = false) {
-        val t = Tab(uid(), u, "Nouvel onglet", g, priv)
-        d.tabs += t; d.current = t.id; refresh()
-        if (u == HOME) addr.requestFocus()
-    }
-
-    private fun closeTab(t: Tab) {
-        views.remove(t.id)?.let { box.removeView(it); it.destroy() }
-        d.tabs.remove(t)
-        if (t.priv && d.tabs.none { it.priv }) clearPriv()
-        if (d.current == t.id) d.current = d.tabs.lastOrNull()?.id
-        refresh()
-    }
-
-    private fun clearPriv() {
-        if (multi) ProfileStore.getInstance().getOrCreateProfile(PRIV).run { cookieManager.removeAllCookies(null); webStorage.deleteAllData() }
-    }
-
     private fun tabs() {
         sheet("Onglets · ${d.p.name}") {
             chip("Onglet", I.ADD) { close(); newTab(g = null) }
@@ -496,31 +703,6 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun go(q: String) {
-        val v = q.trim(); if (v.isEmpty()) return
-        val u = when {
-            v.startsWith("http://") || v.startsWith("https://") -> v
-            !v.contains(' ') && v.contains('.') -> "https://$v"
-            else -> "https://www.google.com/search?q=" + URLEncoder.encode(v, "UTF-8")
-        }
-        open(u); addr.clearFocus()
-        getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(addr.windowToken, 0)
-    }
-
-    private fun open(u: String) { web?.loadUrl(u) }
-
-    private fun goHome() {
-        val t = tab ?: return
-        t.url = HOME; t.title = "Nouvel onglet"
-        web?.loadDataWithBaseURL(null, homeHtml(), "text/html", "utf-8", null); showAddr(false)
-    }
-
-    private fun share() {
-        tab?.url?.takeIf { it.startsWith("http") }?.let {
-            startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, it), null))
-        }
-    }
-
     private fun homeHtml(): String {
         val hello = if (Calendar.getInstance().get(Calendar.HOUR_OF_DAY) in 5..17) "Bonjour" else "Bonsoir"
         val tiles = d.bookmarks.take(16).joinToString("") { e ->
@@ -538,84 +720,6 @@ i{width:58px;height:58px;border-radius:20px;background:#22262E;display:flex;alig
 img{width:30px;height:30px}b{width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:22px;color:#fff}
 span{max-width:74px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}</style>
 <h1>$hello, ${esc(d.p.name)}</h1><p>${esc(d.p.email.ifEmpty { "Que voulez-vous explorer ?" })}</p><div class=g>$tiles</div>"""
-    }
-
-    /** Google refuse la connexion s'il détecte une WebView : on masque l'en-tête X-Requested-With et la marque « Android WebView ». */
-    private fun hideWebView(st: WebSettings) {
-        if (WebViewFeature.isFeatureSupported(WebViewFeature.REQUESTED_WITH_HEADER_ALLOW_LIST))
-            WebSettingsCompat.setRequestedWithHeaderOriginAllowList(st, emptySet())
-        if (WebViewFeature.isFeatureSupported(WebViewFeature.USER_AGENT_METADATA)) runCatching {
-            val m = WebSettingsCompat.getUserAgentMetadata(st)
-            val brands = m.brandVersionList.map { b ->
-                if (b.brand.contains("WebView")) UserAgentMetadata.BrandVersion.Builder().setBrand("Google Chrome")
-                    .setMajorVersion(b.majorVersion).setFullVersion(b.fullVersion).build() else b
-            }
-            WebSettingsCompat.setUserAgentMetadata(st, UserAgentMetadata.Builder(m).setBrandVersionList(brands).build())
-        }
-    }
-
-    private fun applyDark(w: WebView) {
-        if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) WebSettingsCompat.setAlgorithmicDarkeningAllowed(w.settings, darkSites)
-    }
-
-    @SuppressLint("SetJavaScriptEnabled")
-    private fun makeWeb(t: Tab) = WebView(this).apply {
-        if (multi) WebViewCompat.setProfile(this, profName(t))
-        setBackgroundColor(BG)
-        settings.javaScriptEnabled = true
-        settings.domStorageEnabled = true
-        settings.builtInZoomControls = true; settings.displayZoomControls = false
-        if (t.priv) settings.cacheMode = WebSettings.LOAD_NO_CACHE
-        // Retire le marqueur WebView : sinon Google refuse souvent la connexion au compte.
-        settings.userAgentString = settings.userAgentString.replace("; wv", "").replace(Regex("Version/\\S+ "), "")
-        hideWebView(settings)
-        applyDark(this)
-        addJavascriptInterface(Bridge(t), "NV")
-        webViewClient = object : WebViewClient() {
-            override fun shouldOverrideUrlLoading(v: WebView, r: WebResourceRequest): Boolean {
-                val u = r.url.toString()
-                if (u.startsWith("http")) return false
-                runCatching {
-                    startActivity(if (u.startsWith("intent:")) Intent.parseUri(u, Intent.URI_INTENT_SCHEME).apply {
-                        addCategory(Intent.CATEGORY_BROWSABLE); component = null; selector = null
-                    } else Intent(Intent.ACTION_VIEW, r.url))
-                }
-                return true
-            }
-            override fun onPageFinished(v: WebView, u: String) {
-                v.evaluateJavascript(JS, null)
-                if (!u.startsWith("http")) return
-                t.url = u; t.title = v.title?.ifBlank { null } ?: u
-                record(t, u)
-                if (t.id == d.current && !addr.hasFocus()) showAddr(false)
-            }
-        }
-        webChromeClient = object : WebChromeClient() {
-            override fun onProgressChanged(v: WebView, p: Int) {
-                if (t.id == d.current) { prog.progress = p; prog.visibility = if (p < 100) View.VISIBLE else View.INVISIBLE }
-            }
-            override fun onReceivedIcon(v: WebView, icon: Bitmap) {
-                val h = host(v.url)
-                if (t.priv || h.isEmpty() || excluded(v.url ?: "")) return
-                icons[h] = icon
-                runCatching { File(icDir, "$h.png").outputStream().use { icon.compress(Bitmap.CompressFormat.PNG, 100, it) } }
-            }
-            override fun onShowFileChooser(v: WebView, cb: ValueCallback<Array<Uri>>, p: FileChooserParams): Boolean {
-                fileCb?.onReceiveValue(null); fileCb = cb
-                return try { @Suppress("DEPRECATION") startActivityForResult(p.createIntent(), 2); true } catch (e: Exception) { fileCb = null; false }
-            }
-        }
-        setDownloadListener { u, ua, cd, mime, _ ->
-            runCatching {
-                val cookie = if (multi) ProfileStore.getInstance().getProfile(profName(t))?.cookieManager?.getCookie(u) else CookieManager.getInstance().getCookie(u)
-                val r = DownloadManager.Request(Uri.parse(u)).addRequestHeader("User-Agent", ua).setMimeType(mime)
-                    .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                    .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, URLUtil.guessFileName(u, cd, mime))
-                cookie?.let { r.addRequestHeader("Cookie", it) }
-                getSystemService(DownloadManager::class.java).enqueue(r); toast("Téléchargement…")
-            }.onFailure { toast("Échec du téléchargement") }
-        }
-        if (t.url == HOME) loadDataWithBaseURL(null, homeHtml(), "text/html", "utf-8", null) else loadUrl(t.url)
     }
 
     // ---------- Historique avec exclusions ----------
@@ -658,7 +762,6 @@ span{max-width:74px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}</
         }
     }
 
-    // ---------- Profils ----------
     private fun profiles() {
         sheet("Profils") {
             chip("Nouveau profil", I.ADD) {
@@ -691,7 +794,7 @@ span{max-width:74px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}</
             if (p.id != d.p.id) row(ic(I.DELETE, RED), "Supprimer ce profil", "Onglets, favoris, historique et mots de passe", color = RED) {
                 confirm("Supprimer ${p.name} et toutes ses données ?") {
                     close(); s.delete(p)
-                    if (multi) runCatching { ProfileStore.getInstance().deleteProfile("nv_" + p.id) }
+                    rt.storageController.clearDataForSessionContext("nv_" + p.id)
                 }
             }
         }
@@ -712,13 +815,6 @@ span{max-width:74px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}</
         }.onFailure { toast("Image illisible") }
     }
 
-    private fun switchTo(p: Profile) {
-        if (p.id == d.p.id) return
-        views.values.forEach { box.removeView(it); it.destroy() }
-        views.clear()
-        s.switch(p); refresh(); toast("Profil : ${p.name}")
-    }
-
     // ---------- Mots de passe ----------
     private fun passwords(authed: Boolean = false) {
         val km = getSystemService(KeyguardManager::class.java)
@@ -728,7 +824,6 @@ span{max-width:74px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}</
         }
         sheet("Mots de passe · ${d.p.name}") {
             chip("Ajouter", I.ADD) { close(); editCred(null) }
-            chip("Remplir ici", I.PERSON) { close(); fill() }
             chip("Générer", I.KEY) { copy(gen()) }
             if (d.creds.isEmpty()) empty("Aucun mot de passe. Ils vous sont proposés quand vous vous connectez à un site.")
             d.creds.sortedBy { it.host }.forEach { c ->
@@ -758,50 +853,8 @@ span{max-width:74px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}</
         d.creds += Cred(hh, u, p.ifEmpty { gen() }); d.saveCreds(); toast("Enregistré")
     }
 
-    private fun fill() {
-        val h = host(web?.url); val c = d.creds.filter { it.host == h }
-        when {
-            c.isEmpty() -> toast("Aucun mot de passe pour ${h.ifEmpty { "cette page" }}")
-            c.size == 1 -> inject(c[0])
-            else -> sheet("Quel compte ?") { c.forEach { x -> row(siteIcon(x.host, 36), x.user, x.host) { close(); inject(x) } } }
-        }
-    }
-
-    private fun inject(c: Cred) {
-        if (host(web?.url) == c.host) web?.evaluateJavascript("nvFill(${JSONObject.quote(c.user)},${JSONObject.quote(c.pass)})", null)
-    }
-
-    /** Seule méthode exposée aux pages : proposer un identifiant à enregistrer (jamais de lecture). */
-    inner class Bridge(private val t: Tab) {
-        @JavascriptInterface
-        fun captured(user: String, pass: String) {
-            runOnUiThread {
-                val h = host(views[t.id]?.url)
-                val k = "$h|$user|$pass"
-                if (t.priv || pass.isEmpty() || h.isEmpty() || k == lastCap || d.creds.any { "${it.host}|${it.user}|${it.pass}" == k }) return@runOnUiThread
-                lastCap = k
-                ask("Enregistrer le mot de passe ?", msg = "$h\n${user.ifEmpty { "(sans identifiant)" }}\nProfil : ${d.p.name}", ok = "Enregistrer") {
-                    d.creds.removeAll { it.host == h && it.user == user }; d.creds += Cred(h, user, pass); d.saveCreds()
-                }
-            }
-        }
-    }
-
     companion object {
+        private var runtime: GeckoRuntime? = null
         private const val CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#%&*-_+=?"
-        private const val JS = """(function(){if(window.nvOk)return;window.nvOk=1;
-var vis=function(e){return e&&e.offsetParent!==null&&!e.disabled};
-var pws=function(r){return [].slice.call(r.querySelectorAll('input[type=password]')).filter(vis)};
-var users=function(r){return [].slice.call(r.querySelectorAll('input[autocomplete=username],input[type=email],input[type=text],input[type=tel],input:not([type])')).filter(vis)};
-var before=function(r,p){return users(r).filter(function(i){return p.compareDocumentPosition(i)&2}).pop()};
-function grab(s){var p=pws(s).filter(function(i){return i.value}).pop();
- if(!p){var u=users(s).filter(function(i){return i.value})[0];if(u)sessionStorage.nvU=u.value;return}
- var u=before(p.form||document,p);NV.captured(u?u.value:(sessionStorage.nvU||''),p.value)}
-document.addEventListener('submit',function(e){grab(e.target)},true);
-document.addEventListener('keydown',function(e){if(e.key==='Enter'&&e.target.tagName==='INPUT')grab(e.target.form||document)},true);
-document.addEventListener('click',function(e){var b=e.target.closest&&e.target.closest('button,input[type=submit],[role=button]');if(b)grab(b.form||document)},true);
-function set(el,v){if(!el)return;el.focus();Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,v);
- el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}))}
-window.nvFill=function(u,p){var pw=pws(document)[0];set(pw?before(pw.form||document,pw):users(document)[0],u);set(pw,p)};})()"""
     }
 }
