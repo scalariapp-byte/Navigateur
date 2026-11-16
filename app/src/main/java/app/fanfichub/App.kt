@@ -37,14 +37,14 @@ class Hub(ctx: Context) {
     fun pop() { if (stack.size > 1) stack.removeAt(stack.lastIndex) }
     fun work(id: String) = works.firstOrNull { it.id == id }
     fun update(w: Work) { val i = works.indexOfFirst { it.id == w.id }; if (i >= 0) works[i] = w else works += w; store.save(works) }
-    fun setUser(u: String?) { user = u?.trim()?.ifEmpty { null }; prefs.edit().putString("user", user).apply() }
+    fun saveUser(u: String?) { user = u?.trim()?.ifEmpty { null }; prefs.edit().putString("user", user).apply() }
     fun setReader(t: Int = theme, s: Int = size) { theme = t; size = s.coerceIn(14, 30); prefs.edit().putInt("theme", theme).putInt("size", size).apply() }
-    fun logout() { CookieManager.getInstance().removeAllCookies(null); setUser(null) }
+    fun logout() { CookieManager.getInstance().removeAllCookies(null); saveUser(null) }
     fun hasText(id: String) = store.text(id).exists()
     fun text(id: String) = store.text(id).readText()
     fun titles(id: String) = store.titles(id).takeIf { it.exists() }?.readLines() ?: emptyList()
 
-    suspend fun detectUser() { withContext(Dispatchers.IO) { Ao3.username() }?.let { setUser(it) } }
+    suspend fun detectUser() { withContext(Dispatchers.IO) { Ao3.username() }?.let { saveUser(it) } }
 
     suspend fun download(id: String) {
         val (t, html) = withContext(Dispatchers.IO) { Ao3.download(id) }

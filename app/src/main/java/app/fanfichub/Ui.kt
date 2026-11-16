@@ -340,7 +340,7 @@ fun Account(hub: Hub) {
                 Text("Ou entre seulement ton pseudo (favoris publics, sans abonnements) :", color = Mut, fontSize = 13.sp, modifier = Modifier.padding(top = 18.dp, bottom = 8.dp))
                 SearchBox(manual) { manual = it }
                 Spacer(Modifier.height(10.dp))
-                GhostButton("Valider le pseudo") { if (manual.isNotBlank()) { hub.setUser(manual); scope.launch { hub.sync() } } }
+                GhostButton("Valider le pseudo") { if (manual.isNotBlank()) { hub.saveUser(manual); scope.launch { hub.sync() } } }
             } else {
                 GradButton(if (hub.syncing) "Synchronisation…" else "Synchroniser maintenant") { scope.launch { hub.sync() } }
                 Spacer(Modifier.height(10.dp))
@@ -384,7 +384,7 @@ fun Login(hub: Hub) {
         if (done) return
         done = true
         CookieManager.getInstance().flush()
-        scope.launch { if (name != null) hub.setUser(name) else hub.detectUser(); hub.pop(); hub.tab = 0; hub.sync() }
+        scope.launch { if (name != null) hub.saveUser(name) else hub.detectUser(); hub.pop(); hub.tab = 0; hub.sync() }
     }
     Column(Modifier.fillMaxSize().background(Bg)) {
         Row(Modifier.statusBarsPadding().padding(12.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
