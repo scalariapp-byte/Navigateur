@@ -77,8 +77,8 @@ class MainActivity : Activity() {
     private lateinit var box: FrameLayout
     private lateinit var prog: ProgressBar
     private lateinit var tabsBtn: TextView
-    private lateinit var top: View
-    private lateinit var bottom: View
+    private lateinit var topBar: View
+    private lateinit var bottomBar: View
     private lateinit var handle: View
     private val sessions = HashMap<String, GeckoSession>()
     private val canBack = HashSet<String>()
@@ -269,7 +269,7 @@ class MainActivity : Activity() {
             addView(addr, lp(0, -1, 1f))
             addView(icon(I.REFRESH, MUT, 11) { sess?.reload() }, lp(px(42), px(42)))
         }
-        top = LinearLayout(this).apply {
+        topBar = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL; setPadding(px(12), px(8), px(12), px(8)); setBackgroundColor(BG)
             addView(avatarBox, lp(px(40), px(40)).apply { rightMargin = px(10) })
             addView(pill, lp(0, px(46), 1f))
@@ -290,7 +290,7 @@ class MainActivity : Activity() {
             addView(handle, FrameLayout.LayoutParams(px(24), px(72), Gravity.END or Gravity.CENTER_VERTICAL))
         }
         tabsBtn = txt("", 12f, TXT, true).apply { gravity = Gravity.CENTER }
-        bottom = LinearLayout(this).apply {
+        bottomBar = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL; setBackgroundColor(SURF); setPadding(px(4), 0, px(4), 0)
             fun slot(v: View) = addView(v, lp(0, px(56), 1f))
             slot(icon(I.MENU, TXT, 16) { drawer.openDrawer(Gravity.START) })
@@ -305,7 +305,7 @@ class MainActivity : Activity() {
         }
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; setBackgroundColor(BG)
-            addView(top); addView(prog, -1, px(2)); addView(stage, lp(-1, 0, 1f)); addView(bottom)
+            addView(topBar); addView(prog, -1, px(2)); addView(stage, lp(-1, 0, 1f)); addView(bottomBar)
         }
         fun panel(col: LinearLayout, left: Boolean) = ScrollView(this).apply {
             background = GradientDrawable().apply {
@@ -330,7 +330,7 @@ class MainActivity : Activity() {
     override fun onBackPressed() {
         when {
             drawer.isDrawerOpen(Gravity.START) || drawer.isDrawerOpen(Gravity.END) -> drawer.closeDrawers()
-            top.visibility != View.VISIBLE -> sess?.exitFullScreen()
+            topBar.visibility != View.VISIBLE -> sess?.exitFullScreen()
             tab?.id in canBack -> sess?.goBack()
             else -> super.onBackPressed()
         }
@@ -434,7 +434,7 @@ class MainActivity : Activity() {
     private fun goHome() {
         val t = tab ?: return
         t.url = HOME; t.title = "Nouvel onglet"
-        sess?.loadString(homeHtml(), "text/html"); showAddr(false)
+        sess?.loadUri(homeUri()); showAddr(false)
     }
 
     private fun share() {
@@ -481,7 +481,7 @@ class MainActivity : Activity() {
                 }
                 override fun onFullScreen(session: GeckoSession, fullScreen: Boolean) {
                     val v = if (fullScreen) View.GONE else View.VISIBLE
-                    top.visibility = v; bottom.visibility = v; handle.visibility = v; prog.visibility = v
+                    topBar.visibility = v; bottomBar.visibility = v; handle.visibility = v; prog.visibility = v
                 }
                 override fun onContextMenu(session: GeckoSession, screenX: Int, screenY: Int, element: GeckoSession.ContentDelegate.ContextElement) {
                     val link = element.linkUri; val img = element.srcUri
@@ -508,7 +508,7 @@ class MainActivity : Activity() {
             }
             promptDelegate = Prompts(t)
             open(rt)
-            if (t.url == HOME) loadString(homeHtml(), "text/html") else loadUri(t.url)
+            if (t.url == HOME) loadUri(homeUri()) else loadUri(t.url)
         }
     }
 
@@ -702,6 +702,8 @@ class MainActivity : Activity() {
             }
         }
     }
+
+    private fun homeUri() = "data:text/html;charset=utf-8;base64," + Base64.encodeToString(homeHtml().toByteArray(), Base64.NO_WRAP)
 
     private fun homeHtml(): String {
         val hello = if (Calendar.getInstance().get(Calendar.HOUR_OF_DAY) in 5..17) "Bonjour" else "Bonsoir"
