@@ -10,7 +10,7 @@ android {
     kotlinOptions { jvmTarget = "17" }
 }
 dependencies {
-    implementation("org.mozilla.geckoview:geckoview-arm64-v8a:+")
+    implementation("org.mozilla.geckoview:geckoview-arm64-v8a:[140,148)")
     implementation("androidx.drawerlayout:drawerlayout:1.2.0")
     implementation("androidx.core:core:1.13.1")
 }
