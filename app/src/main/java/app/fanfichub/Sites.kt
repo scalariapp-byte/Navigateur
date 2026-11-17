@@ -254,9 +254,8 @@ object Wattpad : Site {
 
     /**
      * Listes de tout Wattpad contenant des histoires avec CHACUN des tags (ex. « luffy dxd »). 25 robots en parallèle :
-     * 1) histoires de chaque tag + des tags combinés (8 pages chacun), 2) listes de leurs auteurs,
-     * 3) lecture de chaque liste : histoires par tag et histoires portant tous les tags (crossovers).
-     * Les listes trouvées arrivent au fil de l'eau via [onHit].
+     * 1) histoires de chaque tag + des tags combinés, 2) leurs auteurs, puis les LECTEURS (abonnés de ces auteurs,
+     * y compris ceux qui n'ont rien publié), 3) chaque liste de ces comptes est lue et analysée dès qu'elle est trouvée.
      */
     suspend fun scanLists(query: String, onProgress: (String) -> Unit, onHit: (ListHit) -> Unit) = coroutineScope {
         val tags = splitTags(query)
@@ -266,34 +265,62 @@ object Wattpad : Site {
         val stories = queries.flatMap { t -> (0 until 8).map { p -> async { bots.withPermit { runCatching { searchStories(t, p * 20) }.getOrDefault(emptyList()) } } } }
             .awaitAll().flatten().distinctBy { it.id }
         if (stories.isEmpty()) error("aucune histoire trouvée")
-        // Auteurs : on alterne entre les tags pour ne pas ignorer le moins populaire
         val byTag = tags.map { t -> stories.filter { w -> w.tags.any { norm(it).contains(t) } || norm(w.title).contains(t) }.map { it.author } }
         val authors = (byTag.flatMap { it.withIndex() }.sortedBy { it.index }.map { it.value } + stories.map { it.author })
-            .filter { it.isNotBlank() }.distinctBy { it.lowercase() }.take(150)
-        onProgress("${stories.size} histoires · lecture des listes de ${authors.size} auteurs…")
-        val lists = authors.map { u -> async { bots.withPermit { runCatching {
-            val a = JSONObject(json("$B/api/v3/users/${enc(u)}/lists?limit=50&fields=lists(id,name,numStories,cover,user(name))", "ui")).optJSONArray("lists") ?: JSONArray()
-            (0 until a.length()).map { hit(a.getJSONObject(it)) }
-        }.getOrDefault(emptyList()) } } }.awaitAll().flatten().distinctBy { it.id }.filter { it.total in 1..1000 }.take(450)
-        val done = java.util.concurrent.atomic.AtomicInteger()
-        onProgress("Analyse de ${lists.size} listes…")
-        lists.map { h -> async { bots.withPermit {
+            .filter { it.isNotBlank() }.distinctBy { it.lowercase() }.take(120)
+
+        val seenUsers = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+        val seenLists = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+        val users = java.util.concurrent.atomic.AtomicInteger(); val lists = java.util.concurrent.atomic.AtomicInteger(); val found = java.util.concurrent.atomic.AtomicInteger()
+        fun progress() = onProgress("${users.get()} comptes · ${lists.get()} listes analysées · ${found.get()} trouvées")
+
+        suspend fun analyse(h: ListHit) = bots.withPermit {
             runCatching {
                 val a = JSONObject(json("$B/api/v3/lists/${h.id}/stories?limit=100&fields=stories(id,title,tags)", "ui")).optJSONArray("stories") ?: JSONArray()
                 val st = (0 until a.length()).map { i -> a.getJSONObject(i).let { o ->
                     val t = o.optJSONArray("tags")
-                    val all = ((if (t == null) emptyList() else (0 until t.length()).map { norm(t.optString(it)) }) + norm(o.optString("title")))
+                    val all = (if (t == null) emptyList() else (0 until t.length()).map { norm(t.optString(it)) }) + norm(o.optString("title"))
                     tags.filter { tg -> all.any { it.contains(tg) } }.toSet()
                 } }
                 val per = tags.map { tg -> st.count { tg in it } }
                 if (per.all { it > 0 }) {
                     val both = st.count { it.size == tags.size }
                     val detail = (if (tags.size > 1 && both > 0) "$both avec tous les tags · " else "") + tags.indices.joinToString(" · ") { "#${tags[it]} ${per[it]}" }
-                    onHit(h.copy(count = per.sum(), score = both * 1000 + per.min(), detail = detail))
+                    found.incrementAndGet(); onHit(h.copy(count = per.sum(), score = both * 1000 + per.min(), detail = detail))
                 }
             }
-            onProgress("Analyse : ${done.incrementAndGet()}/${lists.size} listes")
-        } } }.awaitAll()
+            lists.incrementAndGet(); progress()
+        }
+
+        /** Un compte : ses listes, analysées tout de suite. */
+        suspend fun visit(u: String) = coroutineScope {
+            if (!seenUsers.add(u.lowercase())) return@coroutineScope
+            val ls = bots.withPermit { runCatching {
+                val a = JSONObject(json("$B/api/v3/users/${enc(u)}/lists?limit=50&fields=lists(id,name,numStories,cover,user(name))", "ui")).optJSONArray("lists") ?: JSONArray()
+                (0 until a.length()).map { hit(a.getJSONObject(it)) }
+            }.getOrDefault(emptyList()) }
+            users.incrementAndGet(); progress()
+            ls.filter { it.total in 1..1000 && seenLists.add(it.id) }.map { async { analyse(it) } }.awaitAll()
+        }
+
+        /** Lecteurs d'un auteur : ses abonnés (souvent des comptes sans histoire publiée). */
+        suspend fun readers(u: String): List<String> = bots.withPermit { runCatching {
+            val v = JSONTokener(json("$B/api/v3/users/${enc(u)}/followers?limit=100&fields=users(username)", "ui")).nextValue()
+            fun names(x: Any?): List<String> = when (x) {
+                is JSONObject -> if (x.has("username")) listOf(x.optString("username")) else x.keys().asSequence().toList().flatMap { names(x.opt(it)) }
+                is JSONArray -> (0 until x.length()).flatMap { names(x.opt(it)) }
+                else -> emptyList()
+            }
+            names(v).filter { it.isNotBlank() }
+        }.getOrDefault(emptyList()) }
+
+        onProgress("${stories.size} histoires · ${authors.size} auteurs · recherche des lecteurs…")
+        val jobs = authors.map { a -> async { visit(a) } }.toMutableList()
+        // Lecteurs : abonnés des 40 auteurs les plus liés aux tags, jusqu'à 600 comptes
+        val pool = authors.take(40).map { a -> async { readers(a) } }.awaitAll()
+        val readerNames = pool.flatMap { it.withIndex() }.sortedBy { it.index }.map { it.value }.distinctBy { it.lowercase() }.take(600)
+        jobs += readerNames.map { r -> async { visit(r) } }
+        jobs.awaitAll()
     }
 
     /**
