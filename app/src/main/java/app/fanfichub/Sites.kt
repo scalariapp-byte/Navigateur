@@ -229,10 +229,10 @@ object Wattpad : Site {
     override val searchable = true
 
     /** Recherche d'histoires (API de recherche, puis API v3 en secours). */
-    suspend fun searchStories(q: String, offset: Int): List<Work> {
+    suspend fun searchStories(q: String, offset: Int, limit: Int = 20): List<Work> {
         val e = URLEncoder.encode(q.trim(), "UTF-8")
-        for (u in listOf("$B/v4/search/stories/?query=$e&limit=20&offset=$offset&mature=true&fields=stories($F)",
-                "$B/api/v3/stories?query=$e&limit=20&offset=$offset&fields=stories($F)")) {
+        for (u in listOf("$B/v4/search/stories/?query=$e&limit=$limit&offset=$offset&mature=true&fields=stories($F)",
+                "$B/api/v3/stories?query=$e&limit=$limit&offset=$offset&fields=stories($F)")) {
             val a = runCatching { JSONObject(json(u, "ui")).optJSONArray("stories") }.getOrNull() ?: continue
             if (a.length() > 0) return (0 until a.length()).map { work(a.getJSONObject(it)).copy(sources = setOf("Recherche")) }
         }
@@ -262,8 +262,10 @@ object Wattpad : Site {
         if (tags.isEmpty()) error("tag vide")
         val bots = Semaphore(32)
         fun matched(w: Work) = tags.count { t -> tagged(w.tags, w.title, t) }
-        val queries = (tags + if (tags.size > 1) listOf(tags.joinToString(" ")) else emptyList()).distinct()
-        val stories = queries.flatMap { t -> (0 until 8).map { p -> async { bots.withPermit { runCatching { searchStories(t, p * 20) }.getOrDefault(emptyList()) } } } }
+        // Recherche Wattpad : « #tag » cible les tags ; plusieurs « #a #b » = histoires portant tous les tags (crossovers).
+        val combo = if (tags.size > 1) listOf(tags.joinToString(" ") { "#$it" } to 10, tags.joinToString(" ") to 6) else emptyList()
+        val queries = (combo + tags.map { "#$it" to 6 } + tags.map { it to 4 }).distinctBy { it.first }
+        val stories = queries.flatMap { (t, pages) -> (0 until pages).map { p -> async { bots.withPermit { runCatching { searchStories(t, p * 50, 50) }.getOrDefault(emptyList()) } } } }
             .awaitAll().flatten().distinctBy { it.id }
         if (stories.isEmpty()) error("aucune histoire trouvée")
         stories.forEach { w -> matched(w).takeIf { it > 0 }?.let { onStory(w, it) } }
