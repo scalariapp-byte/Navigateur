@@ -184,6 +184,33 @@ object Wattpad : Site {
         return out.values.toList()
     }
 
+    data class Account(val username: String, val name: String, val avatar: String, val info: String)
+
+    private fun acc(o: JSONObject) = Account(o.optString("username"), o.optString("name"), o.optString("avatar"),
+        listOfNotNull(o.optInt("numLists", -1).takeIf { it >= 0 }?.let { "$it listes" }, o.optInt("numFollowers", -1).takeIf { it >= 0 }?.let { "$it abonnés" },
+            o.optInt("numStoriesPublished", -1).takeIf { it > 0 }?.let { "$it histoires" }).joinToString(" · "))
+
+    /** Cherche récursivement les objets « utilisateur » dans une réponse JSON de forme inconnue. */
+    private fun findUsers(v: Any?): List<Account> = when (v) {
+        is JSONObject -> if (v.has("username")) listOf(acc(v)) else v.keys().asSequence().toList().flatMap { findUsers(v.opt(it)) }
+        is JSONArray -> (0 until v.length()).flatMap { findUsers(v.opt(it)) }
+        else -> emptyList()
+    }
+
+    /** Recherche de comptes : pseudo exact d'abord, puis recherche du site. */
+    suspend fun searchUsers(q: String): List<Account> {
+        val e = URLEncoder.encode(q.trim().removePrefix("@"), "UTF-8")
+        val out = LinkedHashMap<String, Account>()
+        runCatching { findUsers(JSONTokener(json("$B/api/v3/users/$e?fields=username,name,avatar,numLists,numFollowers,numStoriesPublished")).nextValue()) }
+            .getOrDefault(emptyList()).forEach { out[it.username.lowercase()] = it }
+        for (u in listOf("$B/v4/search/users/?query=$e&limit=15&fields=username,name,avatar,numLists,numFollowers,numStoriesPublished", "$B/api/v3/users?query=$e&limit=15")) {
+            val r = runCatching { findUsers(JSONTokener(json(u)).nextValue()) }.getOrDefault(emptyList())
+            r.forEach { out.putIfAbsent(it.username.lowercase(), it) }
+            if (r.isNotEmpty()) break
+        }
+        return out.values.filter { it.username.isNotBlank() }.take(10)
+    }
+
     override fun format(user: String) = when {
         user.isBlank() -> "Entre ton pseudo"
         user.trim().contains(' ') -> "Un pseudo Wattpad ne contient pas d'espace"

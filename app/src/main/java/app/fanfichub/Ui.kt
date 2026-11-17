@@ -52,6 +52,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import android.graphics.BitmapFactory
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import java.net.URL
 import java.util.Calendar
 
 val Bg = Color(0xFF0A0A0F)
@@ -499,6 +508,14 @@ fun Accounts(hub: Hub) {
     }
 }
 
+@Composable
+fun NetImage(url: String, size: Int) {
+    val bmp by produceState<ImageBitmap?>(null, url) {
+        value = withContext(Dispatchers.IO) { runCatching { URL(url).openStream().use { BitmapFactory.decodeStream(it) }?.asImageBitmap() }.getOrNull() }
+    }
+    Box(Modifier.size(size.dp).clip(CircleShape).background(Surf2)) { bmp?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) } }
+}
+
 /** Configuration d'un site en 3 étapes numérotées. */
 @Composable
 fun Setup(hub: Hub, name: String) {
@@ -535,7 +552,42 @@ fun Setup(hub: Hub, name: String) {
                 Step(1, "Se connecter sur le site", "Une page du vrai site s'ouvre. Connecte-toi avec ton e-mail et ton mot de passe (le bouton Google ne marche pas ici).") {
                     FilterPill("Ouvrir ${s.name}", true) { hub.push(Screen.Login(name)) }
                 }
-                if (name != "AO3") Step(2, if (name == "FanFiction.net") "Ton profil" else "Ton pseudo", if (name == "FanFiction.net") "Colle le lien de ton profil." else "Exactement comme sur ton profil.") {
+                if (name == "Wattpad") Step(2, "Trouve ton compte", "Tape ton pseudo ou ton nom, puis appuie sur ton profil dans la liste.") {
+                    var results by remember { mutableStateOf<List<Wattpad.Account>>(emptyList()) }
+                    var searching by remember { mutableStateOf(false) }
+                    LaunchedEffect(v) {
+                        if (v.trim().length < 2 || v == acc) { results = emptyList(); return@LaunchedEffect }
+                        delay(600); searching = true
+                        results = runCatching { Wattpad.searchUsers(v) }.getOrDefault(emptyList())
+                        searching = false
+                    }
+                    Box(Modifier.offset(x = (-20).dp)) { SearchBox(v, "Pseudo ou nom") { v = it; check = null } }
+                    when {
+                        searching -> Text("Recherche…", color = Mut, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+                        v.trim().length >= 2 && v != acc && results.isEmpty() -> Text("✗ Aucun compte trouvé", color = Color(0xFFF87171), fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+                    }
+                    results.forEach { a ->
+                        Row(Modifier.padding(top = 8.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Surf2)
+                            .clickable {
+                                if (checking) return@clickable
+                                v = a.username; results = emptyList(); checking = true; check = null
+                                hub.scope.launch {
+                                    check = try { val r = Wattpad.verify(a.username); hub.saveSiteUser(name, a.username); true to r } catch (e: Exception) { false to (e.message ?: "Vérification impossible") }
+                                    checking = false
+                                }
+                            }.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            NetImage(a.avatar, 40)
+                            Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                                Text(a.name.ifBlank { a.username }, color = Txt, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text("@${a.username}" + if (a.info.isNotEmpty()) " · ${a.info}" else "", color = Mut, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                    }
+                    if (checking) Text("Vérification…", color = Mut, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+                    check?.let { (ok, msg) -> Text((if (ok) "✓ " else "✗ ") + msg, color = if (ok) Color(0xFF4ADE80) else Color(0xFFF87171), fontSize = 13.sp, lineHeight = 19.sp, modifier = Modifier.padding(top = 8.dp)) }
+                    if (acc != null) Row(Modifier.padding(top = 10.dp)) { FilterPill("Retirer @$acc", false) { hub.saveSiteUser(name, null); check = null } }
+                }
+                else if (name != "AO3") Step(2, if (name == "FanFiction.net") "Ton profil" else "Ton pseudo", if (name == "FanFiction.net") "Colle le lien de ton profil." else "Exactement comme sur ton profil.") {
                     val site = Sites.of(name)!!
                     val fmtErr = if (v.isBlank()) null else site.format(v)
                     Box(Modifier.offset(x = (-20).dp)) { SearchBox(v, if (name == "FanFiction.net") "fanfiction.net/u/…" else "Pseudo") { v = it; check = null } }
