@@ -58,7 +58,7 @@ class Hub(ctx: Context) {
     val siteStatus = mutableStateMapOf<String, String>()
     var intro by mutableStateOf<String?>(null)
     var bookAnim by mutableStateOf(prefs.getBoolean("bookAnim", true)); private set
-    fun setBookAnim(v: Boolean) { bookAnim = v; prefs.edit().putBoolean("bookAnim", v).apply() }
+    fun toggleBookAnim(v: Boolean) { bookAnim = v; prefs.edit().putBoolean("bookAnim", v).apply() }
     fun pickSite(s: String, animate: Boolean = false) {
         if (animate && bookAnim && s != "ALL" && s != site) intro = s
         site = s; prefs.edit().putString("site", s).apply()

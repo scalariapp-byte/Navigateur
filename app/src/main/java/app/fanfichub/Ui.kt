@@ -502,7 +502,7 @@ fun Accounts(hub: Hub) {
                 Box(Modifier.width(48.dp).height(28.dp).clip(CircleShape).background(if (amoled) Grad else SolidColor(Surf2)).padding(3.dp),
                     contentAlignment = if (amoled) Alignment.CenterEnd else Alignment.CenterStart) { Box(Modifier.size(22.dp).clip(CircleShape).background(Color.White)) }
             }
-            Row(Modifier.padding(top = 10.dp).fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Surf).clickable { hub.setBookAnim(!hub.bookAnim) }.padding(16.dp),
+            Row(Modifier.padding(top = 10.dp).fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Surf).clickable { hub.toggleBookAnim(!hub.bookAnim) }.padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("Animation du livre", color = Txt, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
