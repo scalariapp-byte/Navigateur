@@ -138,7 +138,7 @@ class Hub(ctx: Context) {
     val trProgress = mutableStateMapOf<String, Float>()
     val trError = mutableStateMapOf<String, String>()
     var webFr by mutableStateOf(prefs.getBoolean("webFr", false)); private set
-    fun setWebFr(v: Boolean) { webFr = v; prefs.edit().putBoolean("webFr", v).apply() }
+    fun toggleWebFr(v: Boolean) { webFr = v; prefs.edit().putBoolean("webFr", v).apply() }
 
     fun pretranslate(id: String) {
         if (hasFr(id) || frJobs[id]?.isActive == true || !hasText(id)) return

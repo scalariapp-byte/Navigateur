@@ -80,8 +80,8 @@ fun WebScreen(hub: Hub, url: String, title: String) {
             Text(when (tr) { null -> "FR"; "FR" -> "VO"; else -> tr!! }, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
                 modifier = Modifier.clip(CircleShape).background(Grad).clickable {
                     when (tr) {
-                        null -> { hub.setWebFr(true); tr = "0 %"; web?.evaluateJavascript(TR_JS, null) }
-                        "FR" -> { hub.setWebFr(false); tr = null; web?.reload() }
+                        null -> { hub.toggleWebFr(true); tr = "0 %"; web?.evaluateJavascript(TR_JS, null) }
+                        "FR" -> { hub.toggleWebFr(false); tr = null; web?.reload() }
                     }
                 }.padding(horizontal = 14.dp, vertical = 10.dp))
             Spacer(Modifier.width(8.dp))
