@@ -288,9 +288,11 @@ object Ffn : Site {
     override suspend fun verify(user: String): String {
         val uid = Regex("(\\d{3,})").find(user)?.value ?: error("Numéro de profil introuvable dans le lien")
         val d = Web.html("$B/u/$uid/", "ui")
-        if (d.title().contains("not exist", true) || d.selectFirst("#content_wrapper_inner") == null) error("Profil $uid introuvable sur FanFiction.net")
-        val name = d.title().substringBefore('|').trim().ifEmpty { "n°$uid" }
-        return "Profil trouvé : $name · ${d.select("div.favstories").size} histoires favorites"
+        val txt = d.text()
+        if (d.title().contains("not exist", true) || txt.contains("User does not exist", true) || txt.contains("User is no longer an active member", true))
+            error("Profil $uid introuvable sur FanFiction.net")
+        val name = d.title().substringBefore('|').trim().takeIf { it.isNotEmpty() && !it.contains("FanFiction", true) } ?: "n°$uid"
+        return "Profil trouvé : $name · ${d.select("div.favstories, div.z-list.favstories").size} histoires favorites visibles"
     }
 
     override val name = "FanFiction.net"
