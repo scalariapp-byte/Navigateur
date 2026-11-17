@@ -52,7 +52,7 @@ class Hub(ctx: Context) {
     val version = Updater.current(ctx)
     /** Chargement des fanfictions hors du fil principal (ouverture instantanée) ; la synchro l'attend. */
     private val loadJob = CoroutineScope(Dispatchers.Main.immediate).launch {
-        val l = withContext(Dispatchers.IO) { store.clearFr(); store.load() }
+        val l = withContext(Dispatchers.IO) { runCatching { store.clearFr() }; runCatching { store.load() }.getOrDefault(emptyList()) }
         works.addAll(l)
     }
     suspend fun awaitLoad() = loadJob.join()
@@ -273,13 +273,25 @@ class Hub(ctx: Context) {
 class MainActivity : ComponentActivity() {
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
+        // Rapport de plantage : l'erreur est enregistrée puis affichée au lancement suivant.
+        val crash = java.io.File(filesDir, "crash.txt")
+        val prev = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { t, e ->
+            runCatching { crash.writeText("Fanfic Hub v${Updater.current(this)}\n" + android.util.Log.getStackTraceString(e)) }
+            prev?.uncaughtException(t, e)
+        }
+        if (crash.exists()) {
+            val text = crash.readText()
+            setContent { CrashScreen(text) { crash.delete(); recreate() } }
+            return
+        }
         enableEdgeToEdge()
         Web.app = applicationContext
         Img.dir = java.io.File(cacheDir, "img").apply { mkdirs() }
         hub = Hub(this)
         handle(intent)
         setContent { HubApp(hub) }
-        hub.prefetchCovers()
+        runCatching { hub.prefetchCovers() }
         BackgroundSync.schedule(this)
         if (android.os.Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED)
             requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
@@ -287,9 +299,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (!::hub.isInitialized) return
         if (::hub.isInitialized) { hub.reload(); if (hub.syncDue(2)) hub.startSync(quick = true) }
     }
-    override fun onPause() { super.onPause(); if (::hub.isInitialized) hub.flush() }
+    override fun onPause() { super.onPause(); if (::hub.isInitialized) runCatching { hub.flush() } }
 
     private lateinit var hub: Hub
     private fun handle(i: Intent?) { if (i?.action == Intent.ACTION_SEND) i.getStringExtra(Intent.EXTRA_TEXT)?.let { hub.pendingImport = it } }
