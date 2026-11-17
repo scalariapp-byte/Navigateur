@@ -136,14 +136,14 @@ class Hub(ctx: Context) {
         if (!more) { results.clear(); listHits.clear(); openedList = null; searchPage = 1 } else searchPage++
         if (q.site == "Wattpad" && q.wpLists) {
             // Tout Wattpad : plusieurs robots en parallèle cherchent les listes qui contiennent des histoires avec ce tag
-            searching = true; searchErr = null; searchMore = false; listTag = q.text.trim(); searchInfo = "Recherche des histoires #${listTag}…"
+            searching = true; searchErr = null; searchMore = false; listTag = q.text.trim(); searchInfo = "25 robots : recherche des histoires " + Wattpad.splitTags(listTag).joinToString(" + ") { "#$it" } + "…"
             searchJob = scope.launch {
                 try {
                     Wattpad.scanLists(listTag,
                         onProgress = { msg -> scope.launch { searchInfo = msg } },
                         onHit = { h -> scope.launch {
                             if (listHits.none { it.id == h.id }) {
-                                val at = listHits.indexOfFirst { it.count < h.count }.let { if (it < 0) listHits.size else it }
+                                val at = listHits.indexOfFirst { it.score < h.score }.let { if (it < 0) listHits.size else it }
                                 listHits.add(at, h)
                             }
                         } })
@@ -192,7 +192,7 @@ class Hub(ctx: Context) {
         results.clear(); searchErr = null
         searching = true
         scope.launch {
-            try { results.addAll(Wattpad.listWorks(h.id).sortedByDescending { Wattpad.tagged(it.tags, it.title, listTag) }); if (results.isEmpty()) searchErr = "Liste vide ou privée" }
+            try { results.addAll(Wattpad.listWorks(h.id).sortedByDescending { w -> Wattpad.splitTags(listTag).count { t -> Wattpad.tagged(w.tags, w.title, t) } }); if (results.isEmpty()) searchErr = "Liste vide ou privée" }
             catch (e: Exception) { searchErr = "Liste illisible : ${e.message}" } finally { searching = false }
         }
     }

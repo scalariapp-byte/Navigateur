@@ -250,30 +250,48 @@ object Wattpad : Site {
         return words.isNotEmpty() && words.all { t -> tags.any { norm(it).contains(t) } || norm(title).contains(t) }
     }
 
+    fun splitTags(q: String) = q.split(Regex("[\\s,+&]+|\\bet\\b")).map(::norm).filter { it.isNotEmpty() }.distinct()
+
     /**
-     * Listes de tout Wattpad contenant des histoires avec ce tag. Robots en parallèle :
-     * 1) histoires #tag (8 pages), 2) listes de leurs auteurs, 3) lecture de chaque liste et comptage des histoires taguées.
+     * Listes de tout Wattpad contenant des histoires avec CHACUN des tags (ex. « luffy dxd »). 25 robots en parallèle :
+     * 1) histoires de chaque tag + des tags combinés (8 pages chacun), 2) listes de leurs auteurs,
+     * 3) lecture de chaque liste : histoires par tag et histoires portant tous les tags (crossovers).
      * Les listes trouvées arrivent au fil de l'eau via [onHit].
      */
-    suspend fun scanLists(tag: String, onProgress: (String) -> Unit, onHit: (ListHit) -> Unit) = coroutineScope {
-        val bots = Semaphore(10)
-        val stories = (0 until 8).map { p -> async { bots.withPermit { runCatching { searchStories(tag, p * 20) }.getOrDefault(emptyList()) } } }.awaitAll().flatten()
-        if (stories.isEmpty()) error("aucune histoire #$tag trouvée")
-        val authors = stories.map { it.author }.filter { it.isNotBlank() }.distinctBy { it.lowercase() }.take(80)
+    suspend fun scanLists(query: String, onProgress: (String) -> Unit, onHit: (ListHit) -> Unit) = coroutineScope {
+        val tags = splitTags(query)
+        if (tags.isEmpty()) error("tag vide")
+        val bots = Semaphore(25)
+        val queries = (tags + if (tags.size > 1) listOf(tags.joinToString(" ")) else emptyList()).distinct()
+        val stories = queries.flatMap { t -> (0 until 8).map { p -> async { bots.withPermit { runCatching { searchStories(t, p * 20) }.getOrDefault(emptyList()) } } } }
+            .awaitAll().flatten().distinctBy { it.id }
+        if (stories.isEmpty()) error("aucune histoire trouvée")
+        // Auteurs : on alterne entre les tags pour ne pas ignorer le moins populaire
+        val byTag = tags.map { t -> stories.filter { w -> w.tags.any { norm(it).contains(t) } || norm(w.title).contains(t) }.map { it.author } }
+        val authors = (byTag.flatMap { it.withIndex() }.sortedBy { it.index }.map { it.value } + stories.map { it.author })
+            .filter { it.isNotBlank() }.distinctBy { it.lowercase() }.take(150)
         onProgress("${stories.size} histoires · lecture des listes de ${authors.size} auteurs…")
         val lists = authors.map { u -> async { bots.withPermit { runCatching {
             val a = JSONObject(json("$B/api/v3/users/${enc(u)}/lists?limit=50&fields=lists(id,name,numStories,cover,user(name))", "ui")).optJSONArray("lists") ?: JSONArray()
             (0 until a.length()).map { hit(a.getJSONObject(it)) }
-        }.getOrDefault(emptyList()) } } }.awaitAll().flatten().distinctBy { it.id }.filter { it.total in 1..1000 }.take(250)
+        }.getOrDefault(emptyList()) } } }.awaitAll().flatten().distinctBy { it.id }.filter { it.total in 1..1000 }.take(450)
         val done = java.util.concurrent.atomic.AtomicInteger()
         onProgress("Analyse de ${lists.size} listes…")
         lists.map { h -> async { bots.withPermit {
-            val n = runCatching {
+            runCatching {
                 val a = JSONObject(json("$B/api/v3/lists/${h.id}/stories?limit=100&fields=stories(id,title,tags)", "ui")).optJSONArray("stories") ?: JSONArray()
-                (0 until a.length()).count { i -> a.getJSONObject(i).let { o ->
-                    val t = o.optJSONArray("tags"); tagged(if (t == null) emptyList() else (0 until t.length()).map { t.optString(it) }, o.optString("title"), tag) } }
-            }.getOrDefault(0)
-            if (n > 0) onHit(h.copy(count = n))
+                val st = (0 until a.length()).map { i -> a.getJSONObject(i).let { o ->
+                    val t = o.optJSONArray("tags")
+                    val all = ((if (t == null) emptyList() else (0 until t.length()).map { norm(t.optString(it)) }) + norm(o.optString("title")))
+                    tags.filter { tg -> all.any { it.contains(tg) } }.toSet()
+                } }
+                val per = tags.map { tg -> st.count { tg in it } }
+                if (per.all { it > 0 }) {
+                    val both = st.count { it.size == tags.size }
+                    val detail = (if (tags.size > 1 && both > 0) "$both avec tous les tags · " else "") + tags.indices.joinToString(" · ") { "#${tags[it]} ${per[it]}" }
+                    onHit(h.copy(count = per.sum(), score = both * 1000 + per.min(), detail = detail))
+                }
+            }
             onProgress("Analyse : ${done.incrementAndGet()}/${lists.size} listes")
         } } }.awaitAll()
     }

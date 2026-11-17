@@ -195,7 +195,7 @@ data class SearchQuery(
 )
 
 /** Liste de lecture trouvée (Wattpad). */
-data class ListHit(val id: String, val name: String, val count: Int, val user: String, val cover: String, val total: Int = 0)
+data class ListHit(val id: String, val name: String, val count: Int, val user: String, val cover: String, val total: Int = 0, val score: Int = 0, val detail: String = "")
 
 /** Champ du formulaire de recherche d'un site (nom, libellé, options valeur → texte). */
 data class FormField(val name: String, val label: String, val options: List<Pair<String, String>>)
