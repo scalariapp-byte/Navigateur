@@ -70,7 +70,12 @@ object Web {
     }
 }
 
+/** Compte trouvé par une recherche : [id] est la valeur enregistrée, [handle] ce qu'on affiche. */
+data class Account(val id: String, val name: String, val handle: String, val avatar: String, val info: String)
+
 interface Site {
+    val searchable: Boolean get() = false
+    suspend fun searchUsers(q: String): List<Account> = emptyList()
     val name: String
     val home: String
     val userHint: String
@@ -203,9 +208,9 @@ object Wattpad : Site {
         return out.values.toList()
     }
 
-    data class Account(val username: String, val name: String, val avatar: String, val info: String)
+    override val searchable = true
 
-    private fun acc(o: JSONObject) = Account(o.optString("username"), o.optString("name"), o.optString("avatar"),
+    private fun acc(o: JSONObject) = Account(o.optString("username"), o.optString("name"), "@" + o.optString("username"), o.optString("avatar"),
         listOfNotNull(o.optInt("numLists", -1).takeIf { it >= 0 }?.let { "$it listes" }, o.optInt("numFollowers", -1).takeIf { it >= 0 }?.let { "$it abonnés" },
             o.optInt("numStoriesPublished", -1).takeIf { it > 0 }?.let { "$it histoires" }).joinToString(" · "))
 
@@ -217,17 +222,17 @@ object Wattpad : Site {
     }
 
     /** Recherche de comptes : pseudo exact d'abord, puis recherche du site. */
-    suspend fun searchUsers(q: String): List<Account> {
+    override suspend fun searchUsers(q: String): List<Account> {
         val e = URLEncoder.encode(q.trim().removePrefix("@"), "UTF-8")
         val out = LinkedHashMap<String, Account>()
         runCatching { findUsers(JSONTokener(json("$B/api/v3/users/$e?fields=username,name,avatar,numLists,numFollowers,numStoriesPublished")).nextValue()) }
-            .getOrDefault(emptyList()).forEach { out[it.username.lowercase()] = it }
+            .getOrDefault(emptyList()).forEach { out[it.id.lowercase()] = it }
         for (u in listOf("$B/v4/search/users/?query=$e&limit=15&fields=username,name,avatar,numLists,numFollowers,numStoriesPublished", "$B/api/v3/users?query=$e&limit=15")) {
             val r = runCatching { findUsers(JSONTokener(json(u)).nextValue()) }.getOrDefault(emptyList())
-            r.forEach { out.putIfAbsent(it.username.lowercase(), it) }
+            r.forEach { out.putIfAbsent(it.id.lowercase(), it) }
             if (r.isNotEmpty()) break
         }
-        return out.values.filter { it.username.isNotBlank() }.take(10)
+        return out.values.filter { it.id.isNotBlank() }.take(10)
     }
 
     override fun format(user: String) = when {
@@ -246,6 +251,22 @@ object Wattpad : Site {
 }
 
 object Ffn : Site {
+    override val searchable = true
+
+    /** Recherche d'utilisateurs via la recherche « writer » du site. */
+    override suspend fun searchUsers(q: String): List<Account> {
+        val t = q.trim()
+        Regex("/u/(\\d+)").find(t)?.groupValues?.get(1)?.let { id -> return listOf(Account("$B/u/$id", "Profil n°$id", "Lien collé", "", "")) }
+        val d = Web.html("$B/search/?ready=1&type=writer&keywords=${URLEncoder.encode(t, "UTF-8")}")
+        val root = d.selectFirst("#content_wrapper_inner") ?: d.body()
+        return root.select("a[href^=/u/]").mapNotNull { a ->
+            val id = Regex("/u/(\\d+)").find(a.attr("href"))?.groupValues?.get(1) ?: return@mapNotNull null
+            val name = a.text().trim().ifEmpty { return@mapNotNull null }
+            val info = a.parent()?.ownText()?.trim()?.take(80) ?: ""
+            Account("$B/u/$id", name, "fanfiction.net/u/$id", "", info)
+        }.distinctBy { it.id }.take(12)
+    }
+
     override fun format(user: String) = if (Regex("\\d{3,}").containsMatchIn(user)) null else "Colle le lien de ton profil, ex. fanfiction.net/u/1234567"
 
     override suspend fun verify(user: String): String {

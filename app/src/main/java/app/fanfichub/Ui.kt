@@ -215,7 +215,7 @@ data class SiteUi(val name: String, val logo: String, val color: Color, val desc
 val SITE_UI = listOf(
     SiteUi("AO3", "AO3", Color(0xFFE5484D), "Favoris, à lire plus tard et abonnements", "Connecte-toi avec ton identifiant AO3 : le pseudo est détecté tout seul."),
     SiteUi("Wattpad", "W", Color(0xFFFF7A1A), "Bibliothèque et listes de lecture", "Cherche ton compte et choisis-le : tes listes de lecture publiques seront récupérées, sans connexion."),
-    SiteUi("FanFiction.net", "FF", Color(0xFF3E7BFA), "Histoires favorites de ton profil", "Copie le lien de ton profil (fanfiction.net/u/123456…). La connexion n'est utile que si le site demande une vérification."),
+    SiteUi("FanFiction.net", "FF", Color(0xFF3E7BFA), "Histoires favorites de ton profil", "Cherche ton nom d'auteur ou colle le lien de ton profil : tes histoires favorites seront récupérées."),
     SiteUi("Spirit Fanfics", "S", Color(0xFF22C3A6), "Ta bibliothèque Spirit", "Connecte-toi sur Spirit, puis indique ton pseudo."),
 )
 fun siteUi(name: String?) = SITE_UI.firstOrNull { it.name == name } ?: SITE_UI[0]
@@ -569,16 +569,17 @@ fun Setup(hub: Hub, name: String) {
             }
             Column(Modifier.padding(20.dp).navigationBarsPadding()) {
                 Text(s.how, color = Color(0xFFCFCFDA), fontSize = 14.sp, lineHeight = 21.sp, modifier = Modifier.padding(bottom = 18.dp))
-                if (name != "Wattpad") Step(1, "Se connecter sur le site", "Une page du vrai site s'ouvre. Connecte-toi avec ton e-mail et ton mot de passe (le bouton Google ne marche pas ici).") {
+                if (Sites.of(name)?.searchable != true) Step(1, "Se connecter sur le site", "Une page du vrai site s'ouvre. Connecte-toi avec ton e-mail et ton mot de passe (le bouton Google ne marche pas ici).") {
                     FilterPill("Ouvrir ${s.name}", true) { hub.push(Screen.Login(name)) }
                 }
-                if (name == "Wattpad") Step(1, "Trouve ton compte", "Tape ton pseudo ou ton nom, puis appuie sur ton profil dans la liste.") {
-                    var results by remember { mutableStateOf<List<Wattpad.Account>>(emptyList()) }
+                val site0 = Sites.of(name)
+                if (site0?.searchable == true) Step(1, "Trouve ton compte", "Tape ton pseudo ou ton nom, puis appuie sur ton profil dans la liste.") {
+                    var results by remember { mutableStateOf<List<Account>>(emptyList()) }
                     var searching by remember { mutableStateOf(false) }
                     LaunchedEffect(v) {
                         if (v.trim().length < 2 || v == acc) { results = emptyList(); return@LaunchedEffect }
                         delay(600); searching = true
-                        results = runCatching { Wattpad.searchUsers(v) }.getOrDefault(emptyList())
+                        results = runCatching { site0.searchUsers(v) }.getOrDefault(emptyList())
                         searching = false
                     }
                     Box(Modifier.offset(x = (-20).dp)) { SearchBox(v, "Pseudo ou nom") { v = it; check = null } }
@@ -590,22 +591,26 @@ fun Setup(hub: Hub, name: String) {
                         Row(Modifier.padding(top = 8.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Surf2)
                             .clickable {
                                 if (checking) return@clickable
-                                v = a.username; results = emptyList(); checking = true; check = null
+                                v = a.id; results = emptyList(); checking = true; check = null
                                 hub.scope.launch {
-                                    check = try { val r = Wattpad.verify(a.username); hub.saveSiteUser(name, a.username); true to r } catch (e: Exception) { false to (e.message ?: "Vérification impossible") }
+                                    check = try { val r = site0.verify(a.id); hub.saveSiteUser(name, a.id); true to r } catch (e: Exception) { false to (e.message ?: "Vérification impossible") }
                                     checking = false
                                 }
                             }.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                            NetImage(a.avatar, 40)
+                            if (a.avatar.isNotEmpty()) NetImage(a.avatar, 40) else Box(Modifier.size(40.dp).clip(CircleShape).background(s.color), contentAlignment = Alignment.Center) {
+                                Text(a.name.take(1).uppercase(), color = Color.White, fontWeight = FontWeight.Bold)
+                            }
                             Column(Modifier.weight(1f).padding(start = 12.dp)) {
-                                Text(a.name.ifBlank { a.username }, color = Txt, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text("@${a.username}" + if (a.info.isNotEmpty()) " · ${a.info}" else "", color = Mut, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(a.name.ifBlank { a.handle }, color = Txt, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(a.handle + if (a.info.isNotEmpty()) " · ${a.info}" else "", color = Mut, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                         }
                     }
                     if (checking) Text("Vérification…", color = Mut, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
                     check?.let { (ok, msg) -> Text((if (ok) "✓ " else "✗ ") + msg, color = if (ok) Color(0xFF4ADE80) else Color(0xFFF87171), fontSize = 13.sp, lineHeight = 19.sp, modifier = Modifier.padding(top = 8.dp)) }
-                    if (acc != null) Row(Modifier.padding(top = 10.dp)) { FilterPill("Retirer @$acc", false) { hub.saveSiteUser(name, null); check = null } }
+                    if (acc != null) Row(Modifier.padding(top = 10.dp)) { FilterPill("Retirer ce compte", false) { hub.saveSiteUser(name, null); check = null } }
+                    if (name == "FanFiction.net") Text("Le site demande une vérification ? Ouvre-le une fois ici.", color = A1, fontSize = 13.sp,
+                        modifier = Modifier.padding(top = 12.dp).clickable { hub.push(Screen.Login(name)) })
                 }
                 else if (name != "AO3") Step(2, if (name == "FanFiction.net") "Ton profil" else "Ton pseudo", if (name == "FanFiction.net") "Colle le lien de ton profil." else "Exactement comme sur ton profil.") {
                     val site = Sites.of(name)!!
@@ -625,7 +630,7 @@ fun Setup(hub: Hub, name: String) {
                         if (acc != null) FilterPill("Retirer", false) { hub.saveSiteUser(name, null); check = null }
                     }
                 }
-                Step(if (name == "AO3" || name == "Wattpad") 2 else 3, "Synchroniser", "Récupère tes fanfictions. Tu peux changer de page pendant ce temps.") {
+                Step(if (name == "AO3" || Sites.of(name)?.searchable == true) 2 else 3, "Synchroniser", "Récupère tes fanfictions. Tu peux changer de page pendant ce temps.") {
                     FilterPill(if (hub.syncing) "En cours…" else "Synchroniser", true) { hub.pickSite(name); hub.startSync(only = name); hub.pop(); hub.tab = 0 }
                 }
                 if (name == "AO3" && acc != null) GhostButton("Se déconnecter d'AO3") { hub.logout() }
