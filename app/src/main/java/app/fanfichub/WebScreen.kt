@@ -44,7 +44,12 @@ function clean(){
  document.querySelectorAll('h1,h2,h3,h4,p,a,span,button,div').forEach(function(e){
   if(e.children.length>3)return;var t=(e.innerText||'').trim();if(!t||t.length>160)return;
   if(!P.some(function(p){return t.indexOf(p)===0}))return;
-  var n=e;while(n.parentElement&&n.parentElement!==document.body&&(n.parentElement.innerText||'').length<1500)n=n.parentElement;hide(n)});
+  var n=e,k=0,lim=innerHeight*0.7;
+  while(k<6&&n.parentElement&&n.parentElement!==document.body&&n.parentElement.parentElement!==document.body
+   &&(n.parentElement.innerText||'').length<1500&&n.parentElement.getBoundingClientRect().height<lim
+   &&!n.parentElement.querySelector('main,article,[role=main],pre'))
+   {n=n.parentElement;k++}
+  if(n.getBoundingClientRect().height<lim&&!n.querySelector('main,article,[role=main]'))hide(n)});
 }
 clean();if(!window.__fhObs){window.__fhObs=new MutationObserver(function(){clearTimeout(window.__fhT);window.__fhT=setTimeout(clean,300)});
 window.__fhObs.observe(document.documentElement,{childList:true,subtree:true})}})()"""

@@ -737,7 +737,7 @@ fun Detail(hub: Hub, id: String) {
             }
             item {
                 Row(Modifier.padding(horizontal = 20.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    StatBox("Mots", fmt(w.words), Modifier.weight(1f))
+                    StatBox("Mots", if (w.words > 0) fmt(w.words) else "—", Modifier.weight(1f))
                     StatBox("Chapitres", w.chapters, Modifier.weight(1f))
                     StatBox("Kudos", fmt(w.kudos), Modifier.weight(1f))
                 }
@@ -761,8 +761,21 @@ fun Detail(hub: Hub, id: String) {
                     Spacer(Modifier.height(10.dp))
                     GhostButton("Lire sur ${w.site} (dans l'app)") { hub.push(Screen.Web(w.link, w.title)) }
                     if (w.summary.isNotBlank()) {
-                        Text("Résumé", color = Txt, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 28.dp, bottom = 8.dp))
-                        Text(w.summary, color = Color(0xFFCFCFDA), fontSize = 15.sp, lineHeight = 23.sp)
+                        var sumFr by remember(id) { mutableStateOf<String?>(null) }
+                        var sumBusy by remember { mutableStateOf(false) }
+                        Row(Modifier.padding(top = 28.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("Résumé", color = Txt, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                            FilterPill(if (sumBusy) "Traduction…" else if (sumFr != null) "VO" else "Traduire", sumFr == null) {
+                                if (sumBusy) return@FilterPill
+                                if (sumFr != null) { sumFr = null; return@FilterPill }
+                                sumBusy = true
+                                hub.scope.launch {
+                                    sumFr = runCatching { Translator.texts(listOf(w.summary)).first() }.getOrElse { "Traduction impossible : ${it.message}" }
+                                    sumBusy = false
+                                }
+                            }
+                        }
+                        Text(sumFr ?: w.summary, color = Color(0xFFCFCFDA), fontSize = 15.sp, lineHeight = 23.sp)
                     }
                     if (w.tags.isNotEmpty()) {
                         Text("Tags", color = Txt, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 26.dp, bottom = 10.dp))
