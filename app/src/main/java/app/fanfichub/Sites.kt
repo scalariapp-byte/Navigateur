@@ -10,6 +10,8 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -237,14 +239,43 @@ object Wattpad : Site {
         return emptyList()
     }
 
-    /** Listes de lecture correspondant à une recherche. */
+    private val listCache = HashMap<String, List<ListHit>>()
+    private fun hit(o: JSONObject) = ListHit(o.get("id").toString(), o.optString("name"), o.optInt("numStories"),
+        o.optJSONObject("user")?.optString("name") ?: "", o.optString("cover"))
+
+    /**
+     * Listes de lecture correspondant à une recherche. Wattpad n'a pas de recherche de listes publique fiable :
+     * on prend les auteurs des histoires trouvées + les comptes correspondants, et on garde leurs listes dont le nom correspond.
+     */
     suspend fun searchLists(q: String, offset: Int): List<ListHit> {
+        val first = q.lowercase().split(Regex("[^\\p{L}\\p{N}]+")).firstOrNull { it.length >= 3 } ?: q.lowercase().trim()
+        api(q, offset).filter { first in it.name.lowercase() }.takeIf { it.isNotEmpty() }?.let { return it }
+        val all = listCache.getOrPut(q.trim().lowercase()) { viaAuthors(q) }
+        return all.drop(offset).take(20)
+    }
+
+    private suspend fun viaAuthors(q: String): List<ListHit> = coroutineScope {
+        val words = q.lowercase().split(Regex("[^\\p{L}\\p{N}]+")).filter { it.length >= 3 }.ifEmpty { listOf(q.lowercase().trim()) }
+        val stories = listOf(async { runCatching { searchStories(q, 0) }.getOrDefault(emptyList()) }, async { runCatching { searchStories(q, 20) }.getOrDefault(emptyList()) }).awaitAll().flatten()
+        val users = runCatching { searchUsers(q) }.getOrDefault(emptyList()).map { it.id }
+        val authors = (users + stories.map { it.author }).filter { it.isNotBlank() }.distinctBy { it.lowercase() }.take(30)
+        val gate = Semaphore(6)
+        authors.map { u -> async { gate.withPermit { runCatching {
+            val a = JSONObject(json("$B/api/v3/users/${enc(u)}/lists?limit=100&fields=lists(id,name,numStories,cover,user(name))", "ui")).optJSONArray("lists") ?: JSONArray()
+            (0 until a.length()).map { hit(a.getJSONObject(it)) }
+        }.getOrDefault(emptyList()) } } }.awaitAll().flatten()
+            .map { h -> h to words.count { h.name.lowercase().contains(it) } }
+            .filter { it.second > 0 && it.first.count > 0 }
+            .sortedWith(compareByDescending<Pair<ListHit, Int>> { it.second }.thenByDescending { it.first.count })
+            .map { it.first }.distinctBy { it.id }
+    }
+
+    private suspend fun api(q: String, offset: Int): List<ListHit> {
         val e = URLEncoder.encode(q.trim(), "UTF-8")
         for (u in listOf("$B/v4/search/lists/?query=$e&limit=20&offset=$offset&fields=lists(id,name,numStories,user(name),cover)",
                 "$B/api/v3/lists?query=$e&limit=20&offset=$offset&fields=lists(id,name,numStories,user(name),cover)")) {
             val a = runCatching { JSONObject(json(u, "ui")).optJSONArray("lists") }.getOrNull() ?: continue
-            if (a.length() > 0) return (0 until a.length()).map { a.getJSONObject(it).let { o ->
-                ListHit(o.get("id").toString(), o.optString("name"), o.optInt("numStories"), o.optJSONObject("user")?.optString("name") ?: "", o.optString("cover")) } }
+            if (a.length() > 0) return (0 until a.length()).map { hit(a.getJSONObject(it)) }
         }
         return emptyList()
     }
@@ -347,7 +378,7 @@ object Ffn : Site {
             "$n/${if (done) n else "?"}", favsOf(meta), summary, emptyList(), Regex("updated:\\s*([^,]+)", IC).find(meta)?.groupValues?.get(1)?.trim() ?: "",
             done, setOf("Favori"), site = name, url = "$B/s/$id", cover = cover, checked = System.currentTimeMillis())
     }
-    private fun img(e: org.jsoup.nodes.Element?): String = e?.let { it.absUrl("data-original").ifBlank { it.absUrl("src") } }?.replace("/75/", "/180/")?.takeIf { it.startsWith("http") } ?: ""
+    private fun img(e: org.jsoup.nodes.Element?): String = e?.let { it.absUrl("data-original").ifBlank { it.absUrl("src") } }?.replace("/75/", "/180/")?.takeIf { it.startsWith("http") && Regex("/image/\\d+/").containsMatchIn(it) } ?: ""
     private fun metaDesc(d: Document) = (d.selectFirst("meta[name=description]")?.attr("content") ?: d.selectFirst("meta[property=og:description]")?.attr("content") ?: "").trim()
 
     override suspend fun info(url: String): Work? {

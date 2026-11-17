@@ -17,7 +17,7 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: fanfichub
-          name: Fanfic Hub (dernière version)
+          name: Fanfic Hub v${{ github.run_number }}
           make_latest: true
           files: |
             FanficHub.apk

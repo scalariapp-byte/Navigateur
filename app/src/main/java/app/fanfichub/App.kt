@@ -53,7 +53,7 @@ class Hub(ctx: Context) {
     /** Chargement des fanfictions hors du fil principal (ouverture instantanée) ; la synchro l'attend. */
     private val loadJob = CoroutineScope(Dispatchers.Main.immediate).launch {
         val l = withContext(Dispatchers.IO) { runCatching { store.clearFr() }; runCatching { store.load() }.getOrDefault(emptyList()) }
-        works.addAll(l)
+        works.addAll(l); refreshDupCovers(l)
     }
     suspend fun awaitLoad() = loadJob.join()
     init { themeMode = prefs.getInt("themeMode", if (prefs.getBoolean("amoled", true)) 0 else 1) }
@@ -76,7 +76,11 @@ class Hub(ctx: Context) {
     fun startSync(full: Boolean = false, only: String? = null, quick: Boolean = false) { scope.launch { sync(full, only, quick) } }
     fun startUpdate() { scope.launch { doUpdate() } }
     fun startImport(url: String) { scope.launch { importUrl(url) } }
-    fun startCheck(manual: Boolean = false) { scope.launch { checkUpdate(manual) } }
+    private var lastCheck = 0L
+    fun startCheck(manual: Boolean = false) {
+        if (!manual && System.currentTimeMillis() - lastCheck < 60_000) return
+        lastCheck = System.currentTimeMillis(); scope.launch { checkUpdate(manual) }
+    }
 
     fun saveSiteUser(site: String, u: String?) {
         val v = u?.trim()?.ifEmpty { null }
@@ -182,11 +186,11 @@ class Hub(ctx: Context) {
         }
     }
     /** Recharge depuis le disque (la synchro d'arrière-plan a pu écrire entre-temps). */
-    fun reload() { if (!syncing && loadJob.isCompleted) { val l = store.load(); if (l.isNotEmpty()) { works.clear(); works.addAll(l) } } }
+    fun reload() { if (!syncing && loadJob.isCompleted) { val l = store.load(); if (l.isNotEmpty()) { works.clear(); works.addAll(l); refreshDupCovers(l) } } }
     fun update(w: Work) { val i = works.indexOfFirst { it.id == w.id }; if (i >= 0) works[i] = w else works += w; persist() }
     private var saveJob: kotlinx.coroutines.Job? = null
     /** Écriture disque groupée et hors du fil principal (plus de saccades). */
-    fun persist() { saveJob?.cancel(); val snap = works.toList(); saveJob = scope.launch(Dispatchers.IO) { kotlinx.coroutines.delay(400); store.save(snap) } }
+    fun persist() { saveJob?.cancel(); val snap = works.toList(); refreshDupCovers(snap); saveJob = scope.launch(Dispatchers.IO) { kotlinx.coroutines.delay(400); store.save(snap) } }
     fun flush() { saveJob?.cancel(); store.save(works.toList()) }
     var downloaded by mutableStateOf(store.downloadedIds()); private set
     /** Toucher un volume de l'étagère : animation puis bibliothèque du site. */
@@ -373,7 +377,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         if (!::hub.isInitialized) return
-        if (::hub.isInitialized) { hub.reload(); if (hub.syncDue(2)) hub.startSync(quick = true) }
+        if (::hub.isInitialized) { hub.reload(); hub.startCheck(); if (hub.syncDue(2)) hub.startSync(quick = true) }
     }
     override fun onPause() { super.onPause(); if (::hub.isInitialized) runCatching { hub.flush() } }
 

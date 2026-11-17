@@ -76,6 +76,12 @@ fun NetFill(url: String, modifier: Modifier = Modifier) {
     bmp?.let { Image(it, null, modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
 }
 
+/** Écarte les images par défaut (bulle FanFiction.net, avatars) : seule une vraie couverture d'histoire est affichée. */
+@Volatile var dupCovers: Set<String> = emptySet()
+/** Une même image sur 3 histoires ou plus = image par défaut du site. */
+fun refreshDupCovers(ws: List<Work>) { dupCovers = ws.groupingBy { it.cover }.eachCount().filter { it.key.isNotBlank() && it.value >= 3 }.keys }
+fun goodCover(u: String) = u.isNotBlank() && u !in dupCovers && ("fanfiction.net" !in u && "fictionpress" !in u || Regex("/image/\\d+/").containsMatchIn(u))
+
 /** Couverture : vraie image si le site en fournit une, sinon couverture générée aux couleurs du fandom. */
 @Composable
 fun BookCover(w: Work, width: Int, modifier: Modifier = Modifier) {
@@ -90,7 +96,7 @@ fun BookCover(w: Work, width: Int, modifier: Modifier = Modifier) {
             Spacer(Modifier.weight(1f))
             Text(w.author, color = Color.White.copy(alpha = 0.75f), fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        if (w.cover.isNotBlank()) NetFill(w.cover)
+        if (goodCover(w.cover)) NetFill(w.cover)
         // Reliure + reflet
         Box(Modifier.fillMaxHeight().width(5.dp).background(Brush.horizontalGradient(listOf(Color.Black.copy(alpha = 0.35f), Color.Transparent))))
         if (w.newChapters > 0) Text("+${w.newChapters}", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Black,

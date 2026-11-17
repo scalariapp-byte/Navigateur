@@ -47,39 +47,40 @@ private val BOOKS = listOf(BookSpec("AO3", 60, 232), BookSpec("Wattpad", 56, 214
 private fun Color.shade(f: Float) = lerp(this, Color.Black, f)
 private fun Color.light(f: Float) = lerp(this, Color.White, f)
 
-/** Volume de manga vu de 3/4 : tranche arrondie, dessus (pages) et côté ombré. */
+/** Couleur de la couverture rigide : presque noire, teintée par le site. */
+fun boardColor(c: Color) = lerp(Color(0xFF141116), c, 0.13f)
+fun spineTitle(site: String) = when (site) { "FanFiction.net" -> "FANFICTION"; "Spirit Fanfics" -> "SPIRIT"; else -> site.uppercase() }
+
+/** Volume « édition prestige » vu de 3/4 : couverture rigide sombre, tranches teintées, titre espacé. */
 @Composable
 private fun MangaSpine(site: String, w: Int, h: Int, vol: Int) {
     val s = siteUi(site)
+    val board = boardColor(s.color)
+    val edge = lerp(s.color, Color.Black, 0.35f)
+    val accent = lerp(s.color, Color.White, 0.25f)
     Box(Modifier.size((w + DEPTH).dp, (h + DEPTH).dp)) {
         Canvas(Modifier.matchParentSize()) {
             val d = DEPTH.dp.toPx(); val W = w.dp.toPx(); val H = size.height
-            // Dessus : tranche des pages
-            drawPath(Path().apply { moveTo(0f, d); lineTo(d, 0f); lineTo(W + d, 0f); lineTo(W, d); close() }, Paper)
-            for (i in 1..7) { val x = W * i / 8f; drawLine(Color(0x26000000), Offset(x, d), Offset(x + d, 0f), 1.2f) }
-            // Côté droit, dans l'ombre
-            drawPath(Path().apply { moveTo(W, d); lineTo(W + d, 0f); lineTo(W + d, H - d); lineTo(W, H); close() }, s.color.shade(0.55f))
-            // Tranche avant arrondie (reflet)
-            drawRect(Brush.horizontalGradient(listOf(s.color.shade(0.35f), s.color.light(0.18f), s.color, s.color.shade(0.3f)), startX = 0f, endX = W),
-                Offset(0f, d), Size(W, H - d))
-            // Bandeau blanc (haut) et bandeau éditeur noir (bas), typiques des mangas
-            drawRect(Brush.horizontalGradient(listOf(Color(0xFFDCD6CB), Color(0xFFFBF8F2), Color(0xFFDCD6CB))), Offset(0f, d), Size(W, (H - d) * 0.17f))
-            drawRect(Color(0xFF141414), Offset(0f, H - (H - d) * 0.09f), Size(W, (H - d) * 0.09f))
-            drawLine(Color(0xFFE8C26A), Offset(0f, d + (H - d) * 0.17f), Offset(W, d + (H - d) * 0.17f), 2.5f)
+            val lip = 2.5f * density // la couverture dépasse des pages
+            // Dessus : couverture + tranche des pages teintée
+            drawPath(Path().apply { moveTo(0f, d); lineTo(d, 0f); lineTo(W + d, 0f); lineTo(W, d); close() }, board.shade(0.2f))
+            drawPath(Path().apply { moveTo(lip * 1.5f, d - lip * 0.3f); lineTo(d, lip); lineTo(W + d - lip, lip); lineTo(W - lip * 0.5f, d - lip * 0.3f); close() },
+                Brush.horizontalGradient(listOf(edge.shade(0.2f), edge, edge.shade(0.3f))))
+            for (i in 1..9) { val x = W * i / 10f; drawLine(Color(0x22000000), Offset(x, d - lip * 0.3f), Offset(x + d - lip, lip), 1f) }
+            // Côté : plat de la couverture, dans l'ombre
+            drawPath(Path().apply { moveTo(W, d); lineTo(W + d, 0f); lineTo(W + d, H - d); lineTo(W, H); close() }, board.shade(0.45f))
+            // Dos arrondi (reflet mat)
+            drawRect(Brush.horizontalGradient(listOf(board.shade(0.5f), board.light(0.1f), board, board.shade(0.55f)), startX = 0f, endX = W), Offset(0f, d), Size(W, H - d))
         }
-        Column(Modifier.offset(y = DEPTH.dp).size(w.dp, h.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(Modifier.height((h * 0.17f).dp), contentAlignment = Alignment.Center) { SiteLogo(site, (w * 0.52f).toInt()) }
+        Column(Modifier.offset(y = DEPTH.dp).size(w.dp, h.dp).padding(vertical = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("$vol", color = accent, fontSize = if (vol > 999) 10.sp else 13.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Serif, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
+            Box(Modifier.padding(top = 4.dp).size(width = 14.dp, height = 1.dp).background(accent.copy(alpha = 0.7f)))
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Text(if (site == "FanFiction.net") "FanFiction" else site.substringBefore(' '), color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Black,
-                    softWrap = false, maxLines = 1, style = TextStyle(letterSpacing = 1.sp),
+                Text(spineTitle(site), color = Color(0xFFF2EEE8), fontSize = 15.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
+                    softWrap = false, maxLines = 1, style = TextStyle(letterSpacing = if (site == "FanFiction.net") 3.sp else 6.sp),
                     modifier = Modifier.wrapContentSize(unbounded = true).graphicsLayer { rotationZ = 90f })
             }
-            Box(Modifier.padding(bottom = 6.dp).size(26.dp).clip(CircleShape).background(Color.White), contentAlignment = Alignment.Center) {
-                Text("$vol", color = s.color.shade(0.3f), fontSize = if (vol > 99) 9.sp else 12.sp, fontWeight = FontWeight.Black)
-            }
-            Box(Modifier.height((h * 0.09f).dp), contentAlignment = Alignment.Center) {
-                Text("FH", color = Color(0xFFE8C26A), fontSize = 10.sp, fontWeight = FontWeight.Black)
-            }
+            Text("FH", color = Color(0xFFF2EEE8), fontSize = 10.sp, fontWeight = FontWeight.Black)
         }
     }
 }

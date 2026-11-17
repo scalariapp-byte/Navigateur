@@ -31,7 +31,7 @@ private fun rotZ(p: V, a: Float) = V(p.x * cos(a) - p.y * sin(a), p.x * sin(a) +
 /** Position et orientation du livre (angles en degrés, open de 0 à 1). */
 class BookPose(val cx: Float, val cy: Float, val rx: Float, val ry: Float, val rz: Float, val scale: Float, val open: Float)
 
-private class Face(val pts: List<V>, val color: Color, val lines: List<Pair<V, V>> = emptyList(), val back: Color? = null, val cover: Boolean = false)
+private class Face(val pts: List<V>, val color: Color, val lines: List<Pair<V, V>> = emptyList(), val back: Color? = null, val cover: Boolean = false, val spine: Boolean = false)
 
 private val PaperC = Color(0xFFF3EBDD)
 private val PaperBack = Color(0xFFE6DCC8)
@@ -48,8 +48,11 @@ fun DrawScope.drawBook3D(color: Color, logo: String, title: String, pose: BookPo
     fun proj(q: V): Offset { val s = cam / (cam + q.z); return Offset(pose.cx + q.x * s, pose.cy - q.y * s) }
     fun hinge(p: V, hx: Float, hz: Float, a: Float): V { val r = rotY(V(p.x - hx, p.y, p.z - hz), a); return V(r.x + hx, r.y, r.z + hz) }
 
+    val board = lerp(Color(0xFF141116), color, 0.13f)       // couverture rigide sombre
+    val edge = lerp(color, Color.Black, 0.35f)               // tranches teintées
+    val accent = lerp(color, Color.White, 0.25f)
     val faces = mutableListOf<Face>()
-    fun box(x0: Float, x1: Float, y0: Float, y1: Float, z0: Float, z1: Float, base: Color, pages: Boolean = false) {
+    fun box(x0: Float, x1: Float, y0: Float, y1: Float, z0: Float, z1: Float, base: Color, pages: Boolean = false, spine: Boolean = false) {
         val c = listOf(V(x0, y0, z0), V(x1, y0, z0), V(x1, y1, z0), V(x0, y1, z0), V(x0, y0, z1), V(x1, y0, z1), V(x1, y1, z1), V(x0, y1, z1))
         listOf(listOf(0, 1, 2, 3), listOf(5, 4, 7, 6), listOf(4, 5, 1, 0), listOf(3, 2, 6, 7), listOf(4, 0, 3, 7), listOf(1, 5, 6, 2)).forEachIndexed { i, q ->
             val pts = q.map { c[it] }
@@ -57,12 +60,12 @@ fun DrawScope.drawBook3D(color: Color, logo: String, title: String, pose: BookPo
                 val z = z0 + (z1 - z0) * k / 8f
                 if (i <= 3) V(x0 + 2, pts[0].y, z) to V(x1 - 2, pts[0].y, z) else V(pts[0].x, y0 + 2, z) to V(pts[0].x, y1 - 2, z)
             } else emptyList()
-            faces += Face(pts, base, lines)
+            faces += Face(pts, if (pages && i >= 2) edge else base, lines, spine = spine && i == 4)
         }
     }
     // Repère : couverture côté caméra (z = -ht), dos à gauche (x = -hw).
-    box(-hw, hw, -hh, hh, ht - 4, ht, lerp(color, Color.Black, 0.45f))
-    box(-hw, -hw + 4, -hh, hh, -ht, ht, lerp(color, Color.Black, 0.3f))
+    box(-hw, hw, -hh, hh, ht - 4, ht, board)
+    box(-hw, -hw + 4, -hh, hh, -ht, ht, board, spine = true)
     box(-hw + 3, hw - 4, -hh + 4, hh - 4, -ht + 3, ht - 4, PaperC, pages = true)
     val zTop = -ht + 2.9f
     val text = (0 until 13).map { i ->
@@ -83,7 +86,7 @@ fun DrawScope.drawBook3D(color: Color, logo: String, title: String, pose: BookPo
     // Couverture articulée
     val ca = 178f * deg * (pose.open / 0.42f).coerceIn(0f, 1f)
     val cz = -ht - 0.5f
-    faces += Face(listOf(V(-hw, -hh, cz), V(hw, -hh, cz), V(hw, hh, cz), V(-hw, hh, cz)).map { hinge(it, -hw, cz, ca) }, color, back = Color(0xFFEDE3D1), cover = true)
+    faces += Face(listOf(V(-hw, -hh, cz), V(hw, -hh, cz), V(hw, hh, cz), V(-hw, hh, cz)).map { hinge(it, -hw, cz, ca) }, board, back = lerp(edge, Color.Black, 0.3f), cover = true)
 
     val light = V(-0.45f, 0.65f, -1f).norm()
     val drawn = faces.map { f -> val w = f.pts.map { world(it) }; Triple(f, w, w.map { it.z }.average()) }.sortedByDescending { it.third }
@@ -100,25 +103,46 @@ fun DrawScope.drawBook3D(color: Color, logo: String, title: String, pose: BookPo
         if (f.lines.isNotEmpty() && (f.back == null || true)) f.lines.forEach { (a, b) ->
             drawLine(Color(0x33000000), proj(world(a)), proj(world(b)), 1.6f)
         }
+        if (f.spine && front) {
+            // Dos : titre espacé, lu de haut en bas
+            val o = w.map { proj(it) } // 4,0,3,7 : bas-arrière, bas-avant, haut-avant, haut-arrière
+            val bottom = (o[0] + o[1]) / 2f; val top = (o[2] + o[3]) / 2f
+            val thick = (o[1] - o[0]).getDistance()
+            if (thick > 8f) {
+                val c = (top + bottom) / 2f
+                val ang = Math.toDegrees(kotlin.math.atan2((bottom - top).y.toDouble(), (bottom - top).x.toDouble())).toFloat()
+                val nc = drawContext.canvas.nativeCanvas
+                nc.save(); nc.rotate(ang, c.x, c.y)
+                paint.typeface = serif; paint.isFakeBoldText = false; paint.letterSpacing = 0.45f
+                paint.color = 0xFFF2EEE8.toInt(); paint.textSize = thick * 0.42f
+                nc.drawText(spineName(title), c.x, c.y + thick * 0.15f, paint)
+                nc.restore()
+            }
+        }
         if (f.cover && front) {
-            // Décor de couverture : bandeau, carré du logo, titre
-            fun q(x0: Float, x1: Float, y0: Float, y1: Float) = listOf(V(x0, y0, cz - 0.1f), V(x1, y0, cz - 0.1f), V(x1, y1, cz - 0.1f), V(x0, y1, cz - 0.1f))
-                .map { proj(world(hinge(it, -hw, cz, ca))) }
-            fun fill(o: List<Offset>, c: Color) = drawPath(Path().apply { o.forEachIndexed { i, p -> if (i == 0) moveTo(p.x, p.y) else lineTo(p.x, p.y) }; close() }, c)
-            fill(q(-hw, hw, hh - H * 0.16f, hh), Color(0xFFF7F3EA))
-            fill(q(-W * 0.22f, W * 0.22f, -H * 0.12f, H * 0.18f), Color.White.copy(alpha = 0.92f))
-            val corners = q(-hw, hw, -hh, hh)
-            val center = Offset(corners.map { it.x }.average().toFloat(), corners.map { it.y }.average().toFloat())
+            // Couverture « édition prestige » : sobre, sans illustration
+            val corners = w.map { proj(it) }
+            val center = (corners[0] + corners[1] + corners[2] + corners[3]) / 4f
             val pw = (corners[1] - corners[0]).getDistance()
-            if (pw > 20f) {
-                paint.color = lerp(color, Color.Black, 0.25f).toArgb(); paint.textSize = pw * 0.2f
-                drawContext.canvas.nativeCanvas.drawText(logo, center.x, center.y + pw * 0.05f, paint)
-                paint.color = Color(0xFF141414).toArgb(); paint.textSize = pw * 0.09f
-                val band = q(-hw, hw, hh - H * 0.16f, hh)
-                drawContext.canvas.nativeCanvas.drawText("FANFIC HUB", band.map { it.x }.average().toFloat(), band.map { it.y }.average().toFloat() + pw * 0.03f, paint)
-                paint.color = Color.White.toArgb(); paint.textSize = pw * 0.1f
-                drawContext.canvas.nativeCanvas.drawText(title, center.x, center.y + pw * 0.48f, paint)
+            val ang = Math.toDegrees(kotlin.math.atan2((corners[1] - corners[0]).y.toDouble(), (corners[1] - corners[0]).x.toDouble())).toFloat()
+            val ph = (corners[3] - corners[0]).getDistance()
+            if (pw > 24f) {
+                val nc = drawContext.canvas.nativeCanvas
+                nc.save(); nc.rotate(ang, center.x, center.y)
+                paint.typeface = serif; paint.isFakeBoldText = false
+                paint.letterSpacing = 0.25f; paint.color = accent.copy(alpha = 0.85f).toArgb(); paint.textSize = pw * 0.045f
+                nc.drawText("ÉDITION PRESTIGE", center.x, center.y - ph * 0.40f, paint)
+                paint.letterSpacing = 0.55f; paint.color = 0xFFF2EEE8.toInt(); paint.textSize = pw * 0.13f
+                nc.drawText(spineName(title), center.x, center.y, paint)
+                paint.letterSpacing = 0.12f; paint.color = accent.toArgb(); paint.textSize = pw * 0.055f
+                nc.drawText("FANFIC HUB", center.x, center.y + pw * 0.11f, paint)
+                paint.typeface = android.graphics.Typeface.DEFAULT_BOLD; paint.letterSpacing = 0f; paint.color = 0xFFF2EEE8.toInt(); paint.textSize = pw * 0.06f
+                nc.drawText(logo, center.x, center.y + ph * 0.44f, paint)
+                nc.restore()
             }
         }
     }
 }
+
+private val serif: android.graphics.Typeface = android.graphics.Typeface.create(android.graphics.Typeface.SERIF, android.graphics.Typeface.NORMAL)
+private fun spineName(t: String) = when (t) { "FanFiction.net" -> "FANFICTION"; "Spirit Fanfics" -> "SPIRIT"; else -> t.uppercase() }
