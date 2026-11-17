@@ -43,7 +43,9 @@ class Hub(ctx: Context) {
     var tab by mutableIntStateOf(0)
     var user by mutableStateOf(prefs.getString("user", null)); private set
     var syncing by mutableStateOf(false); private set
-    /** Message court affiché en bulle (Toast). */
+    /** État de la synchro : silencieux (jamais en bulle). */
+    var syncInfo: String? = null
+    /** Message court affiché en bulle (Toast) : uniquement après une action de l'utilisateur. */
     var status: String? = null
         set(v) { field = v; if (v != null) android.os.Handler(android.os.Looper.getMainLooper()).post { android.widget.Toast.makeText(app, v, android.widget.Toast.LENGTH_SHORT).show() } }
     var theme by mutableIntStateOf(prefs.getInt("theme", 0)); private set
@@ -297,8 +299,8 @@ class Hub(ctx: Context) {
         val now = System.currentTimeMillis()
         fun fresh(w: Work) = quick && now - w.checked < 3 * 3_600_000L
         val u = user.takeIf { only == null || only == "AO3" }
-        if (only != null && account(only) == null && works.none { it.site == only }) { status = "Configure d'abord ton compte $only"; return }
-        if (u == null && users.isEmpty() && works.none { it.site != "AO3" }) { status = "Connecte un compte pour synchroniser"; return }
+        if (only != null && account(only) == null && works.none { it.site == only }) { syncInfo = "Configure d'abord ton compte $only"; return }
+        if (u == null && users.isEmpty() && works.none { it.site != "AO3" }) { syncInfo = "Connecte un compte pour synchroniser"; return }
         if (syncing) return
         syncing = true
         val old = works.associateBy { it.id }
@@ -323,7 +325,7 @@ class Hub(ctx: Context) {
             while (url != null && n++ < max) {
                 val (list, next) = withContext(Dispatchers.IO) { Ao3.page(url!!, src) }
                 list.forEach { add(it) }; publish()
-                status = "AO3 · ${src.lowercase()} · ${seen.size} fanfictions"; syncProgress = null
+                syncInfo = "AO3 · ${src.lowercase()} · ${seen.size} fanfictions"; syncProgress = null
                 if (!full && stop(list)) break
                 url = next
             }
@@ -358,7 +360,7 @@ class Hub(ctx: Context) {
                                 else -> withContext(Dispatchers.IO) { Ao3.work(id, "Abonnement") }?.copy(checked = now)
                             }
                             w?.let { add(it) }
-                            done++; status = "AO3 · abonnements $done/${todo.size}"; syncProgress = done.toFloat() / todo.size
+                            done++; syncInfo = "AO3 · abonnements $done/${todo.size}"; syncProgress = done.toFloat() / todo.size
                             if (done % 8 == 0) publish()
                         }
                     }
@@ -372,7 +374,7 @@ class Hub(ctx: Context) {
                 val su = users[s.name]
                 if (su != null) runCatching {
                     siteStatus.remove(s.name)
-                    status = "${s.name} · bibliothèque…"; syncProgress = null
+                    syncInfo = "${s.name} · bibliothèque…"; syncProgress = null
                     val l = s.library(su, old); l.forEach { add(it) }; publish()
                     siteStatus[s.name] = "${l.size} fanfictions synchronisées"
                 }.onFailure { e -> siteStatus[s.name] = if (old.values.any { it.site == s.name }) "Synchro partielle : ${e.message}" else "Erreur : ${e.message}" }
@@ -382,7 +384,7 @@ class Hub(ctx: Context) {
                 val targets = (seen.values.filter { it.site == s.name && (it.chapters.startsWith("?") || noSummary(it) || slugTitle(old[it.id] ?: it)) } +
                     old.values.filter { it.site == s.name && it.id !in seen && (full || !it.complete) && !fresh(it) }).distinctBy { it.id }
                 targets.forEachIndexed { i, w ->
-                    status = "${s.name} · détails ${i + 1}/${targets.size}"; syncProgress = (i + 1f) / targets.size
+                    syncInfo = "${s.name} · détails ${i + 1}/${targets.size}"; syncProgress = (i + 1f) / targets.size
                     runCatching { s.info(w.link) }.getOrNull()?.let { add(it.copy(sources = seen[w.id]?.sources ?: w.sources, checked = now)) }
                     if (i % 4 == 3) publish()
                 }
@@ -391,10 +393,10 @@ class Hub(ctx: Context) {
             if (only == null) prefs.edit().putLong("lastSync", System.currentTimeMillis()).apply()
             val mine = works.filter { only == null || it.site == only }
             val nw = mine.count { it.newChapters > 0 }
-            status = (only?.let { "$it · " } ?: "") + "${mine.size} fanfictions · " + if (nw == 0) "tout est à jour" else "$nw avec de nouveaux chapitres"
+            syncInfo = (only?.let { "$it · " } ?: "") + "${mine.size} fanfictions · " + if (nw == 0) "tout est à jour" else "$nw avec de nouveaux chapitres"
         } catch (e: Exception) {
             publish()
-            status = "Synchro interrompue : ${e.message ?: "réseau indisponible"}"
+            syncInfo = "Synchro interrompue : ${e.message ?: "réseau indisponible"}"
         } finally { syncing = false; syncProgress = null; prefetchCovers() }
     }
 
