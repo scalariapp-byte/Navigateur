@@ -302,7 +302,7 @@ fun Home(hub: Hub) {
     LaunchedEffect(hub.pendingImport) { hub.pendingImport?.let { hub.pendingImport = null; hub.startImport(it) } }
     if (hub.site == null) { SitePicker(hub); return }
     Box(Modifier.fillMaxSize()) {
-        PullToRefreshBox(isRefreshing = false, onRefresh = { hub.startSync() }, modifier = Modifier.fillMaxSize()) {
+        PullToRefreshBox(isRefreshing = false, onRefresh = { hub.startSync(only = hub.site?.takeIf { it != "ALL" }) }, modifier = Modifier.fillMaxSize()) {
             when (hub.tab) { 0 -> Feed(hub); 1 -> Library(hub); else -> Accounts(hub) }
         }
         SyncPill(hub, Modifier.align(Alignment.TopCenter))
@@ -358,7 +358,7 @@ fun SiteStateCard(hub: Hub) {
         SiteLogo(name, 40)
         Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
             Text(if (acc == null) "Connecte ton compte ${s.name}" else acc, color = Txt, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            Text(hub.siteStatus[name] ?: if (acc == null) "Appuie ici, c'est rapide" else "Tire vers le bas pour synchroniser", color = Mut, fontSize = 13.sp,
+            Text(hub.siteStatus[name] ?: if (acc == null) "Appuie ici, c'est rapide" else "Tire vers le bas pour synchroniser ce site", color = Mut, fontSize = 13.sp,
                 maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
         Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Mut)
@@ -606,7 +606,7 @@ fun Setup(hub: Hub, name: String) {
                     }
                 }
                 Step(if (name == "AO3" || name == "Wattpad") 2 else 3, "Synchroniser", "Récupère tes fanfictions. Tu peux changer de page pendant ce temps.") {
-                    FilterPill(if (hub.syncing) "En cours…" else "Synchroniser", true) { hub.pickSite(name); hub.startSync(); hub.pop(); hub.tab = 0 }
+                    FilterPill(if (hub.syncing) "En cours…" else "Synchroniser", true) { hub.pickSite(name); hub.startSync(only = name); hub.pop(); hub.tab = 0 }
                 }
                 if (name == "AO3" && acc != null) GhostButton("Se déconnecter d'AO3") { hub.logout() }
             }
@@ -625,7 +625,7 @@ fun Login(hub: Hub, site: String) {
         done = true
         CookieManager.getInstance().flush()
         if (site != "AO3") { hub.pop(); return }
-        hub.scope.launch { if (name != null) hub.saveUser(name) else hub.detectUser(); hub.pop(); hub.pop(); hub.pickSite("AO3"); hub.tab = 0; hub.startSync() }
+        hub.scope.launch { if (name != null) hub.saveUser(name) else hub.detectUser(); hub.pop(); hub.pop(); hub.pickSite("AO3"); hub.tab = 0; hub.startSync(only = "AO3") }
     }
     Column(Modifier.fillMaxSize().background(Bg)) {
         Row(Modifier.statusBarsPadding().padding(12.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

@@ -56,7 +56,7 @@ class Hub(ctx: Context) {
     val siteStatus = mutableStateMapOf<String, String>()
     fun pickSite(s: String) { site = s; prefs.edit().putString("site", s).apply() }
     fun account(s: String) = if (s == "AO3") user else users[s]
-    fun startSync(full: Boolean = false) { scope.launch { sync(full) } }
+    fun startSync(full: Boolean = false, only: String? = null) { scope.launch { sync(full, only) } }
     fun startUpdate() { scope.launch { doUpdate() } }
     fun startImport(url: String) { scope.launch { importUrl(url) } }
     fun startCheck(manual: Boolean = false) { scope.launch { checkUpdate(manual) } }
@@ -117,8 +117,9 @@ class Hub(ctx: Context) {
     }
 
     /** Synchro incrémentale : s'arrête dès que les pages ne contiennent plus que des fanfictions connues et inchangées. */
-    suspend fun sync(full: Boolean = false) {
-        val u = user
+    suspend fun sync(full: Boolean = false, only: String? = null) {
+        val u = user.takeIf { only == null || only == "AO3" }
+        if (only != null && account(only) == null && works.none { it.site == only }) { status = "Configure d'abord ton compte $only"; return }
         if (u == null && users.isEmpty() && works.none { it.site != "AO3" }) { status = "Connecte un compte pour synchroniser"; return }
         if (syncing) return
         syncing = true
@@ -128,7 +129,7 @@ class Hub(ctx: Context) {
         fun unchanged(w: Work) = old[w.id]?.let { it.chapters == w.chapters && it.updated == w.updated } == true
         fun publish() {
             val merged = LinkedHashMap<String, Work>()
-            old.values.filter { !full || it.site != "AO3" }.forEach { merged[it.id] = it }
+            old.values.filter { !(full && it.site == "AO3" && u != null) }.forEach { merged[it.id] = it }
             seen.values.forEach { f ->
                 val o = old[f.id]
                 merged[f.id] = if (o == null) f else f.copy(newChapters = o.newChapters + maxOf(0, f.published - o.published),
@@ -185,7 +186,7 @@ class Hub(ctx: Context) {
             siteStatus["AO3"] = "${seen.values.count { it.site == "AO3" }} fanfictions synchronisées"
           }
             // 5. Autres sites : bibliothèque du compte puis fanfictions suivies non terminées.
-            for (s in Sites.all) {
+            for (s in Sites.all.filter { only == null || it.name == only }) {
                 val su = users[s.name]
                 if (su != null) runCatching {
                     status = "${s.name} · bibliothèque…"; syncProgress = null
@@ -198,9 +199,10 @@ class Hub(ctx: Context) {
                 }
                 publish()
             }
-            prefs.edit().putLong("lastSync", System.currentTimeMillis()).apply()
-            val nw = works.count { it.newChapters > 0 }
-            status = "${works.size} fanfictions · " + if (nw == 0) "tout est à jour" else "$nw avec de nouveaux chapitres"
+            if (only == null) prefs.edit().putLong("lastSync", System.currentTimeMillis()).apply()
+            val mine = works.filter { only == null || it.site == only }
+            val nw = mine.count { it.newChapters > 0 }
+            status = (only?.let { "$it · " } ?: "") + "${mine.size} fanfictions · " + if (nw == 0) "tout est à jour" else "$nw avec de nouveaux chapitres"
         } catch (e: Exception) {
             publish()
             status = "Synchro interrompue : ${e.message ?: "réseau indisponible"}"
