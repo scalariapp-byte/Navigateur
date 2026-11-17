@@ -45,7 +45,7 @@ class Hub(ctx: Context) {
     var syncing by mutableStateOf(false); private set
     /** Message court affiché en bulle (Toast). */
     var status: String? = null
-        set(v) { field = v; if (v != null) android.os.Handler(android.os.Looper.getMainLooper()).post { android.widget.Toast.makeText(ctx, v, android.widget.Toast.LENGTH_SHORT).show() } }
+        set(v) { field = v; if (v != null) android.os.Handler(android.os.Looper.getMainLooper()).post { android.widget.Toast.makeText(app, v, android.widget.Toast.LENGTH_SHORT).show() } }
     var theme by mutableIntStateOf(prefs.getInt("theme", 0)); private set
     var size by mutableIntStateOf(prefs.getInt("size", 19)); private set
     val users = mutableStateMapOf<String, String>().apply { Sites.all.forEach { s -> prefs.getString("user_${s.name}", null)?.let { put(s.name, it) } } }
