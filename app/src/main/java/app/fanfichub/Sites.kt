@@ -426,18 +426,49 @@ object Spirit : Site {
 
     override suspend fun library(user: String, known: Map<String, Work>): List<Work> {
         val u = URLEncoder.encode(user.trim(), "UTF-8")
-        val found = LinkedHashMap<String, Pair<String, String>>() // slug -> (titre, collection)
-        for ((path, src) in listOf("/perfil/$u/favoritos" to "Favori", "/perfil/$u/biblioteca" to "Bibliothèque", "/biblioteca" to "Bibliothèque")) {
-            val d = runCatching { Web.html(B + path) }.getOrNull() ?: continue
+        val ic = RegexOption.IGNORE_CASE
+        val titles = LinkedHashMap<String, String>()          // slug -> titre
+        val sources = LinkedHashMap<String, MutableSet<String>>() // slug -> collections
+        fun addStories(d: Document, src: String) {
             d.select("a[href*=/historia/]").forEach { a ->
                 val sl = slug(a.attr("href")) ?: return@forEach
-                if (a.text().isNotBlank() && !Regex("/historia/$sl/").containsMatchIn(a.attr("href"))) found.putIfAbsent(sl, a.text() to src)
+                if (Regex("/historia/$sl/").containsMatchIn(a.attr("href"))) return@forEach // lien de chapitre
+                if (titles[sl].isNullOrBlank() && a.text().isNotBlank()) titles[sl] = a.text() else titles.putIfAbsent(sl, "")
+                sources.getOrPut(sl) { mutableSetOf() } += src
             }
         }
-        if (found.isEmpty()) error("aucune histoire trouvée (favoris et bibliothèque vides ou privés ; connecte-toi à l'étape 1)")
-        return found.map { (sl, p) ->
-            known["sp:$sl"]?.copy(sources = setOf(p.second))
-                ?: Work("sp:$sl", p.first, "", listOf(name), "", 0, "?/?", 0, "", emptyList(), "", false, setOf(p.second), site = name, url = "$B/historia/$sl")
+        // Favoris et bibliothèque
+        for ((path, src) in listOf("/perfil/$u/favoritos" to "Favori", "/perfil/$u/biblioteca" to "Bibliothèque", "/biblioteca" to "Bibliothèque")) {
+            runCatching { Web.html(B + path) }.getOrNull()?.let { addStories(it, src) }
+        }
+        // Listes de lecture : liens « lista » du profil et de la page « Veja todas as Listas de leitura »
+        val lists = LinkedHashMap<String, String>() // url -> nom
+        fun collectLists(d: Document) = d.select("a[href*=lista]").forEach { a ->
+            val name = a.text().replace(Regex("\\s*\\d+\\s+hist[óo]rias?.*$", ic), "").trim()
+            if (name.isBlank() || name.startsWith("Veja", true) || name.contains("Listas de leitura", true)) return@forEach
+            lists.putIfAbsent(a.absUrl("href").substringBefore('#'), name)
+        }
+        for (path in listOf("/perfil/$u", "/perfil/$u/listas")) {
+            val d = runCatching { Web.html(B + path) }.getOrNull() ?: continue
+            collectLists(d)
+            d.select("a").firstOrNull { it.text().contains("Listas de leitura", true) && it.text().startsWith("Veja", true) }?.absUrl("href")
+                ?.let { all -> runCatching { Web.html(all) }.getOrNull()?.let { collectLists(it) } }
+        }
+        lists.entries.take(40).forEach { (href, name) ->
+            var url: String? = href; var n = 0
+            while (url != null && n++ < 10) {
+                val d = runCatching { Web.html(url!!) }.getOrNull() ?: break
+                addStories(d, "Liste : $name")
+                val next = d.select("a[rel=next], a").firstOrNull { it.attr("rel") == "next" || Regex("^pr[óo]xim", ic).containsMatchIn(it.text()) }?.absUrl("href")
+                url = next?.takeIf { it.isNotBlank() && it != url }
+            }
+        }
+        if (titles.isEmpty()) error("aucune histoire trouvée (favoris, bibliothèque et listes vides ou privés ; connecte-toi à l'étape 1)")
+        return titles.map { (sl, t) ->
+            val src = sources[sl] ?: mutableSetOf("Favori")
+            known["sp:$sl"]?.copy(sources = src)
+                ?: Work("sp:$sl", t.ifBlank { sl.substringBeforeLast('-').replace('-', ' ') }, "", listOf(name), "", 0, "?/?", 0, "", emptyList(), "", false, src,
+                    site = name, url = "$B/historia/$sl")
         }
     }
 }
