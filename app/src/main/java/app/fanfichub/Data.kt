@@ -101,10 +101,19 @@ object Ao3 {
         when (q.status) { 1 -> p.append("&work_search%5Bcomplete%5D=T"); 2 -> p.append("&work_search%5Bcomplete%5D=F") }
         if (q.lang.isNotEmpty()) p.append("&work_search%5Blanguage_id%5D=").append(q.lang)
         if (q.fandom.isNotBlank()) p.append("&work_search%5Bfandom_names%5D=").append(e(q.fandom))
+        if (q.character.isNotBlank()) p.append("&work_search%5Bcharacter_names%5D=").append(e(q.character))
         if (q.rating > 0) p.append("&work_search%5Brating_ids%5D=").append(q.rating)
         if (q.minWords > 0) p.append("&work_search%5Bwords_from%5D=").append(q.minWords)
         return this.page(p.toString(), "Recherche").first
     }
+
+    /** Auto-complétion officielle d'AO3 (kind : fandom, character, relationship, freeform). */
+    fun autocomplete(kind: String, term: String): List<String> = runCatching {
+        val body = Jsoup.connect("$BASE/autocomplete/$kind?term=" + java.net.URLEncoder.encode(term.trim(), "UTF-8"))
+            .ignoreContentType(true).userAgent(UA).cookies(cookies()).timeout(15000).execute().body()
+        val a = JSONArray(body)
+        (0 until a.length()).map { a.getJSONObject(it).optString("name").ifBlank { a.getJSONObject(it).optString("id") } }.filter { it.isNotBlank() }
+    }.getOrDefault(emptyList())
 
     fun username(): String? = runCatching {
         get("/").selectFirst("#greeting a[href^=/users/], ul.user.navigation a[href^=/users/], a.dropdown-toggle[href^=/users/]")
@@ -182,4 +191,11 @@ object Ao3 {
 data class SearchQuery(
     val text: String = "", val site: String = "AO3", val sort: Int = 0, val status: Int = 0,
     val lang: String = "", val rating: Int = 0, val minWords: Int = 0, val fandom: String = "",
+    val character: String = "", val wpLists: Boolean = false, val spirit: Map<String, Pair<String, String>> = emptyMap(),
 )
+
+/** Liste de lecture trouvée (Wattpad). */
+data class ListHit(val id: String, val name: String, val count: Int, val user: String, val cover: String)
+
+/** Champ du formulaire de recherche d'un site (nom, libellé, options valeur → texte). */
+data class FormField(val name: String, val label: String, val options: List<Pair<String, String>>)

@@ -127,16 +127,27 @@ class Hub(ctx: Context) {
 
     fun runSearch(more: Boolean = false) {
         val q = query
-        if (q.text.isBlank() && q.fandom.isBlank()) return
+        if (q.text.isBlank() && q.fandom.isBlank() && q.character.isBlank() && q.spirit.isEmpty()) return
         searchJob?.cancel()
-        if (!more) { results.clear(); searchPage = 1 } else searchPage++
+        if (!more) { results.clear(); listHits.clear(); openedList = null; searchPage = 1 } else searchPage++
+        if (q.site == "Wattpad" && q.wpLists) {
+            searching = true; searchErr = null
+            searchJob = scope.launch {
+                try {
+                    val l = Wattpad.searchLists(q.text, (searchPage - 1) * 20)
+                    listHits.addAll(l.filter { h -> listHits.none { it.id == h.id } }); searchMore = l.size >= 10
+                    if (listHits.isEmpty()) searchErr = "Aucune liste trouvée"
+                } catch (e: Exception) { searchErr = "Recherche impossible : ${e.message}" } finally { searching = false }
+            }
+            return
+        }
         searching = true; searchErr = null
         searchJob = scope.launch {
             try {
                 val raw = when (q.site) {
                     "Wattpad" -> Wattpad.searchStories(q.text, (searchPage - 1) * 20)
                     "FanFiction.net" -> Ffn.searchStories(q.text, searchPage)
-                    "Spirit Fanfics" -> Spirit.searchStories(q.text, searchPage)
+                    "Spirit Fanfics" -> Spirit.searchStories(q.text, searchPage, q.spirit.mapValues { it.value.first })
                     else -> withContext(Dispatchers.IO) { Ao3.search(q, searchPage) }
                 }
                 // Filtres appliqués par l'app quand le site ne les propose pas
@@ -156,6 +167,20 @@ class Hub(ctx: Context) {
     }
 
     fun addToLibrary(w: Work) { update(w.copy(sources = setOf("Ajouté"))) }
+
+    val listHits = mutableStateListOf<ListHit>()
+    var openedList by mutableStateOf<ListHit?>(null); private set
+    var spiritForm by mutableStateOf<List<FormField>>(emptyList()); private set
+    fun loadSpiritForm() { if (spiritForm.isEmpty()) scope.launch { runCatching { Spirit.searchForm() }.onSuccess { spiritForm = it } } }
+    fun openList(h: ListHit?) {
+        openedList = h
+        if (h == null) { results.clear(); return }
+        results.clear(); searching = true; searchErr = null
+        scope.launch {
+            try { results.addAll(Wattpad.listWorks(h.id)); if (results.isEmpty()) searchErr = "Liste vide ou privée" }
+            catch (e: Exception) { searchErr = "Liste illisible : ${e.message}" } finally { searching = false }
+        }
+    }
     /** Recharge depuis le disque (la synchro d'arrière-plan a pu écrire entre-temps). */
     fun reload() { if (!syncing && loadJob.isCompleted) { val l = store.load(); if (l.isNotEmpty()) { works.clear(); works.addAll(l) } } }
     fun update(w: Work) { val i = works.indexOfFirst { it.id == w.id }; if (i >= 0) works[i] = w else works += w; persist() }

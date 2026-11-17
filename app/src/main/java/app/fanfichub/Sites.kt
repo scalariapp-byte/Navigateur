@@ -237,6 +237,20 @@ object Wattpad : Site {
         return emptyList()
     }
 
+    /** Listes de lecture correspondant à une recherche. */
+    suspend fun searchLists(q: String, offset: Int): List<ListHit> {
+        val e = URLEncoder.encode(q.trim(), "UTF-8")
+        for (u in listOf("$B/v4/search/lists/?query=$e&limit=20&offset=$offset&fields=lists(id,name,numStories,user(name),cover)",
+                "$B/api/v3/lists?query=$e&limit=20&offset=$offset&fields=lists(id,name,numStories,user(name),cover)")) {
+            val a = runCatching { JSONObject(json(u, "ui")).optJSONArray("lists") }.getOrNull() ?: continue
+            if (a.length() > 0) return (0 until a.length()).map { a.getJSONObject(it).let { o ->
+                ListHit(o.get("id").toString(), o.optString("name"), o.optInt("numStories"), o.optJSONObject("user")?.optString("name") ?: "", o.optString("cover")) } }
+        }
+        return emptyList()
+    }
+
+    suspend fun listWorks(id: String): List<Work> = listStories(id).map { work(it).copy(sources = setOf("Recherche")) }
+
     private fun acc(o: JSONObject) = Account(o.optString("username"), o.optString("name"), "@" + o.optString("username"), o.optString("avatar"),
         listOfNotNull(o.optInt("numLists", -1).takeIf { it >= 0 }?.let { "$it listes" }, o.optInt("numFollowers", -1).takeIf { it >= 0 }?.let { "$it abonnés" },
             o.optInt("numStoriesPublished", -1).takeIf { it > 0 }?.let { "$it histoires" }).joinToString(" · "))
@@ -441,8 +455,22 @@ object Spirit : Site {
      * Recherche (page « busca ») : chaque résultat donne titre, « escrita por » auteur, statut,
      * « Capítulos N », « Palavras N », « Categorias … », résumé et image.
      */
-    suspend fun searchStories(q: String, page: Int): List<Work> {
-        val d = Web.html("$B/busca?query=${URLEncoder.encode(q.trim(), "UTF-8")}&pagina=$page", "ui")
+    /** Formulaire de recherche du site (catégorie, personnages, genres, tri…), lu sur la page « busca ». */
+    suspend fun searchForm(): List<FormField> {
+        val d = Web.html("$B/busca?query=a", "ui")
+        return d.select("select[name]").mapNotNull { s ->
+            val nm = s.attr("name").ifBlank { return@mapNotNull null }
+            val opts = s.select("option").map { it.attr("value") to it.text().trim() }.filter { it.second.isNotBlank() }
+            if (opts.size < 2) return@mapNotNull null
+            val label = s.id().takeIf { it.isNotBlank() }?.let { d.selectFirst("label[for=$it]")?.text() }
+                ?: generateSequence(s.previousElementSibling()) { it.previousElementSibling() }.firstOrNull { it.text().isNotBlank() }?.text()?.takeIf { it.length < 40 } ?: nm
+            FormField(nm, label.trim(), opts)
+        }.distinctBy { it.name }
+    }
+
+    suspend fun searchStories(q: String, page: Int, filters: Map<String, String> = emptyMap()): List<Work> {
+        val extra = filters.filterValues { it.isNotBlank() }.entries.joinToString("") { "&" + URLEncoder.encode(it.key, "UTF-8") + "=" + URLEncoder.encode(it.value, "UTF-8") }
+        val d = Web.html("$B/busca?query=${URLEncoder.encode(q.trim(), "UTF-8")}&pagina=$page$extra", "ui")
         val ic = RegexOption.IGNORE_CASE
         val out = LinkedHashMap<String, Work>()
         d.select("a[href*=/historia/]").forEach { a ->
