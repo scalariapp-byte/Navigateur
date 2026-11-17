@@ -13,7 +13,7 @@ jobs:
         with: { distribution: temurin, java-version: 17 }
       - uses: gradle/actions/setup-gradle@v5
         with: { gradle-version: "8.13" }
-      - run: gradle assembleDebug --no-daemon && cp app/build/outputs/apk/debug/app-debug.apk FanficHub.apk && echo $GITHUB_RUN_NUMBER > version.txt
+      - run: gradle assembleRelease --no-daemon && cp app/build/outputs/apk/release/app-release.apk FanficHub.apk && ls -la FanficHub.apk && echo $GITHUB_RUN_NUMBER > version.txt
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: fanfichub
