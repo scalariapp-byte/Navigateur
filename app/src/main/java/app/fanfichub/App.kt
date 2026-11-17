@@ -124,7 +124,24 @@ class Hub(ctx: Context) {
     fun logout() { CookieManager.getInstance().removeAllCookies(null); saveUser(null) }
     fun hasText(id: String) = id in downloaded
     fun text(id: String) = store.text(id).readText()
-    fun hasFr(id: String) = store.fr(id).exists()
+    var frReady by mutableStateOf(store.frIds()); private set
+    fun hasFr(id: String) = id in frReady
+    val trProgress = mutableStateMapOf<String, Float>()
+    val trError = mutableStateMapOf<String, String>()
+    /** Résumés traduits (mémoire), préparés dès l'ouverture d'une fiche. */
+    val summaryFr = mutableStateMapOf<String, String>()
+    var webFr by mutableStateOf(prefs.getBoolean("webFr", false)); private set
+    fun setWebFr(v: Boolean) { webFr = v; prefs.edit().putBoolean("webFr", v).apply() }
+
+    /** Traduction d'avance, en silence : prête quand on appuie sur « Traduire ». */
+    fun pretranslate(id: String) {
+        if (hasFr(id) || id in trProgress || !hasText(id)) return
+        trProgress[id] = 0f; trError.remove(id)
+        scope.launch {
+            try { translate(id) { trProgress[id] = it }; frReady = frReady + id } catch (e: Exception) { trError[id] = e.message ?: "Traduction impossible" }
+            finally { trProgress.remove(id) }
+        }
+    }
     fun textFr(id: String) = store.fr(id).readText()
     suspend fun translate(id: String, progress: (Float) -> Unit) { store.fr(id).writeText(Translator.toFrench(text(id), progress)) }
     fun titles(id: String) = store.titles(id).takeIf { it.exists() }?.readLines() ?: emptyList()
@@ -134,7 +151,7 @@ class Hub(ctx: Context) {
     suspend fun download(id: String) {
         val w = work(id) ?: return
         val (t, html) = if (w.site == "AO3") withContext(Dispatchers.IO) { Ao3.download(id) } else Sites.of(w.site)!!.download(w)
-        store.text(id).writeText(html); store.titles(id).writeText(t.joinToString("\n")); store.fr(id).delete(); downloaded = downloaded + id
+        store.text(id).writeText(html); store.titles(id).writeText(t.joinToString("\n")); store.fr(id).delete(); frReady = frReady - id; downloaded = downloaded + id; pretranslate(id)
         work(id)?.let { update(it.copy(newChapters = 0)) }
     }
 

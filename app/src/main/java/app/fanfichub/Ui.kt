@@ -761,18 +761,14 @@ fun Detail(hub: Hub, id: String) {
                     Spacer(Modifier.height(10.dp))
                     GhostButton("Lire sur ${w.site} (dans l'app)") { hub.push(Screen.Web(w.link, w.title)) }
                     if (w.summary.isNotBlank()) {
-                        var sumFr by remember(id) { mutableStateOf<String?>(null) }
-                        var sumBusy by remember { mutableStateOf(false) }
+                        var showFr by remember(id) { mutableStateOf(false) }
+                        LaunchedEffect(id) { if (hub.summaryFr[id] == null) runCatching { Translator.texts(listOf(w.summary)).first() }.onSuccess { hub.summaryFr[id] = it } }
+                        val sumFr = if (showFr) hub.summaryFr[id] else null
+                        val sumBusy = showFr && hub.summaryFr[id] == null
                         Row(Modifier.padding(top = 28.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text("Résumé", color = Txt, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                             FilterPill(if (sumBusy) "Traduction…" else if (sumFr != null) "VO" else "Traduire", sumFr == null) {
-                                if (sumBusy) return@FilterPill
-                                if (sumFr != null) { sumFr = null; return@FilterPill }
-                                sumBusy = true
-                                hub.scope.launch {
-                                    sumFr = runCatching { Translator.texts(listOf(w.summary)).first() }.getOrElse { "Traduction impossible : ${it.message}" }
-                                    sumBusy = false
-                                }
+                                showFr = !showFr
                             }
                         }
                         Text(sumFr ?: w.summary, color = Color(0xFFCFCFDA), fontSize = 15.sp, lineHeight = 23.sp)

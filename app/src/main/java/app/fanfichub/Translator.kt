@@ -7,6 +7,11 @@ import com.google.mlkit.nl.translate.TranslateLanguage
 import com.google.mlkit.nl.translate.Translation
 import com.google.mlkit.nl.translate.TranslatorOptions
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -40,20 +45,9 @@ object Translator {
         (0 until a.length()).joinToString("") { a.getJSONArray(it).optString(0) }
     }
 
-    /** Groupes de paragraphes (< 4 500 caractères) séparés par une ligne vide. */
     private suspend fun viaGoogle(blocks: List<Element>, progress: (Float) -> Unit) {
-        var i = 0
-        while (i < blocks.size) {
-            var j = i; var len = 0
-            while (j < blocks.size && (j == i || len + blocks[j].text().length < 4500)) { len += blocks[j].text().length + 2; j++ }
-            val group = blocks.subList(i, j)
-            val out = google(group.joinToString("\n\n") { it.text() }).split(Regex("\n\\s*\n"))
-            if (out.size == group.size) group.forEachIndexed { k, e -> e.text(out[k].trim()).attr("data-fr", "1") }
-            else group.forEach { e -> e.text(google(e.text())).attr("data-fr", "1") } // découpage différent : un par un
-            i = j
-            progress(i.toFloat() / blocks.size)
-            delay(150)
-        }
+        val res = texts(blocks.map { it.text() }, progress)
+        blocks.forEachIndexed { i, e -> e.text(res[i]).attr("data-fr", "1") }
     }
 
     private suspend fun viaMlKit(blocks: List<Element>, sample: String, progress: (Float) -> Unit) {
@@ -70,21 +64,32 @@ object Translator {
         } finally { tr.close() }
     }
 
-    /** Traduit une liste de textes courts (pages web) par lots ; garde l'ordre. */
-    suspend fun texts(items: List<String>, progress: (Float) -> Unit = {}): List<String> {
+    private val cache = android.util.LruCache<String, String>(6000)
+
+    /** Traduit une liste de textes ; lots de ~4 500 caractères envoyés 4 par 4 en parallèle ; cache mémoire. */
+    suspend fun texts(items: List<String>, progress: (Float) -> Unit = {}): List<String> = coroutineScope {
         val src = items.map { it.replace(Regex("\\s+"), " ").trim() }
-        val out = src.toMutableList()
-        var i = 0
-        while (i < src.size) {
-            var j = i; var len = 0
-            while (j < src.size && (j == i || len + src[j].length < 4500)) { len += src[j].length + 2; j++ }
-            val group = src.subList(i, j)
-            val res = google(group.joinToString("\n\n")).split(Regex("\n\\s*\n"))
-            if (res.size == group.size) for (k in group.indices) out[i + k] = res[k].trim()
-            else for (k in group.indices) out[i + k] = google(group[k]).trim()
-            i = j; progress(i.toFloat() / src.size); delay(120)
+        val out = src.map { if (it.isEmpty()) it else cache.get(it) }.toMutableList()
+        val todo = src.indices.filter { out[it] == null }
+        val groups = mutableListOf<List<Int>>(); var cur = mutableListOf<Int>(); var len = 0
+        for (i in todo) {
+            if (cur.isNotEmpty() && len + src[i].length > 4500) { groups += cur; cur = mutableListOf(); len = 0 }
+            cur += i; len += src[i].length + 2
         }
-        return out
+        if (cur.isNotEmpty()) groups += cur
+        val sem = Semaphore(4); var done = 0
+        groups.map { g ->
+            async {
+                sem.withPermit {
+                    val res = google(g.joinToString("\n\n") { src[it] }).split(Regex("\n\\s*\n"))
+                    if (res.size == g.size) g.forEachIndexed { k, i -> out[i] = res[k].trim() }
+                    else g.forEach { i -> out[i] = google(src[i]).trim() }
+                    g.forEach { i -> out[i]?.let { cache.put(src[i], it) } }
+                    done += g.size; progress(done.toFloat() / maxOf(1, todo.size))
+                }
+            }
+        }.awaitAll()
+        src.indices.map { out[it] ?: src[it] }
     }
 
     suspend fun toFrench(html: String, progress: (Float) -> Unit): String {

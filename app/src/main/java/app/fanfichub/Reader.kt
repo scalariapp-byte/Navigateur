@@ -71,8 +71,11 @@ fun Reader(hub: Hub, id: String) {
     var web by remember { mutableStateOf<WebView?>(null) }
     var loaded by remember { mutableIntStateOf(-1) }
     var fr by remember { mutableStateOf(hub.hasFr(id)) }
-    var trProgress by remember { mutableStateOf<Float?>(null) }
-    var trError by remember { mutableStateOf<String?>(null) }
+    var wantFr by remember { mutableStateOf(false) }
+    val trProgress = hub.trProgress[id]
+    val trError = hub.trError[id]
+    LaunchedEffect(id) { hub.pretranslate(id) }
+    LaunchedEffect(wantFr, hub.hasFr(id)) { if (wantFr && hub.hasFr(id)) { fr = true; wantFr = false } }
     val t = THEMES[hub.theme]
     val bg = Color(t.second)
     val fg = Color(t.third)
@@ -125,13 +128,9 @@ fun Reader(hub: Hub, id: String) {
                 Text(trProgress?.let { "${(it * 100).toInt()} %" } ?: if (fr) "VO" else if (hub.hasFr(id)) "FR" else "Traduire",
                     color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
                     modifier = Modifier.padding(end = 8.dp).clip(CircleShape).background(Grad).clickable {
-                        if (trProgress != null) return@clickable
                         if (hub.hasFr(id)) { fr = !fr; return@clickable }
-                        trProgress = 0f; trError = null
-                        hub.scope.launch {
-                            try { hub.translate(id) { trProgress = it }; fr = true } catch (e: Exception) { trError = e.message ?: "Traduction impossible" }
-                            trProgress = null
-                        }
+                        wantFr = true
+                        hub.pretranslate(id)
                     }.padding(horizontal = 14.dp, vertical = 9.dp))
                 if (titles.size > 1) CircleIcon(Icons.AutoMirrored.Filled.List) { toc = !toc }
             }
@@ -139,10 +138,10 @@ fun Reader(hub: Hub, id: String) {
 
         trError?.let {
             Text("Traduction : $it", color = Color.White, fontSize = 13.sp, modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 80.dp, start = 20.dp, end = 20.dp)
-                .clip(RoundedCornerShape(14.dp)).background(Color(0xFFB91C1C)).clickable { trError = null }.padding(12.dp))
+                .clip(RoundedCornerShape(14.dp)).background(Color(0xFFB91C1C)).clickable { hub.trError.remove(id) }.padding(12.dp))
         }
-        trProgress?.let {
-            Text("Traduction en français… ${(it * 100).toInt()} %" + if (it == 0f) " (téléchargement du modèle de langue la 1re fois)" else "", color = Txt, fontSize = 13.sp,
+        if (wantFr) trProgress?.let {
+            Text("Traduction en français… ${(it * 100).toInt()} %", color = Txt, fontSize = 13.sp,
                 modifier = Modifier.align(Alignment.Center).padding(24.dp).clip(RoundedCornerShape(16.dp)).background(Surf2).padding(16.dp))
         }
 

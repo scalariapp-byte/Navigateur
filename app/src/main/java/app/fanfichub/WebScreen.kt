@@ -80,8 +80,8 @@ fun WebScreen(hub: Hub, url: String, title: String) {
             Text(when (tr) { null -> "FR"; "FR" -> "VO"; else -> tr!! }, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
                 modifier = Modifier.clip(CircleShape).background(Grad).clickable {
                     when (tr) {
-                        null -> { tr = "0 %"; web?.evaluateJavascript(TR_JS, null) }
-                        "FR" -> { tr = null; web?.reload() }
+                        null -> { hub.setWebFr(true); tr = "0 %"; web?.evaluateJavascript(TR_JS, null) }
+                        "FR" -> { hub.setWebFr(false); tr = null; web?.reload() }
                     }
                 }.padding(horizontal = 14.dp, vertical = 10.dp))
             Spacer(Modifier.width(8.dp))
@@ -100,7 +100,10 @@ fun WebScreen(hub: Hub, url: String, title: String) {
                 webViewClient = object : WebViewClient() {
                     override fun shouldOverrideUrlLoading(v: WebView, r: WebResourceRequest) = !r.url.scheme.orEmpty().startsWith("http")
                     override fun doUpdateVisitedHistory(v: WebView, u: String?, reload: Boolean) { canBack = v.canGoBack() }
-                    override fun onPageFinished(v: WebView, u: String?) { v.evaluateJavascript(CLEAN_JS, null) }
+                    override fun onPageFinished(v: WebView, u: String?) {
+                        v.evaluateJavascript(CLEAN_JS, null)
+                        if (hub.webFr && tr != "0 %") { tr = "0 %"; v.postDelayed({ v.evaluateJavascript(TR_JS, null) }, 600) }
+                    }
                 }
                 webChromeClient = object : WebChromeClient() { override fun onProgressChanged(v: WebView, p: Int) { progress = p } }
                 val view = this
