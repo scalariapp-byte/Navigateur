@@ -427,8 +427,11 @@ fun Library(hub: Hub) {
         if (adding) item {
             Column(Modifier.padding(bottom = 14.dp)) {
                 SearchBox(link, "Colle le lien d'une fanfiction") { link = it }
+                val okLink = Regex("archiveofourown\\.org/works/\\d+").containsMatchIn(link) || (link.contains("http") && Sites.find(link) != null)
+                if (link.isNotBlank()) Text(if (okLink) "✓ Lien reconnu" else "✗ Lien non reconnu (AO3, Wattpad, FanFiction.net ou Spirit)",
+                    color = if (okLink) Color(0xFF4ADE80) else Color(0xFFF87171), fontSize = 13.sp, modifier = Modifier.padding(horizontal = 22.dp, vertical = 6.dp))
                 Text("AO3, Wattpad, FanFiction.net ou Spirit. Astuce : dans Chrome, Partager → Fanfic Hub.", color = Mut, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 22.dp, vertical = 8.dp))
-                Box(Modifier.padding(horizontal = 20.dp)) { GradButton("Ajouter") { if (link.isNotBlank()) { val l = link; link = ""; adding = false; hub.startImport(l) } } }
+                Box(Modifier.padding(horizontal = 20.dp)) { GradButton("Ajouter") { if (link.isNotBlank() && (Regex("archiveofourown\\.org/works/\\d+").containsMatchIn(link) || Sites.find(link) != null)) { val l = link; link = ""; adding = false; hub.startImport(l) } } }
             }
         }
         item { SearchBox(q) { q = it } }
@@ -502,6 +505,8 @@ fun Setup(hub: Hub, name: String) {
     val s = siteUi(name)
     val acc = hub.account(name)
     var v by remember(acc) { mutableStateOf(acc ?: "") }
+    var check by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
+    var checking by remember { mutableStateOf(false) }
     @Composable
     fun Step(n: Int, title: String, body: String, content: @Composable () -> Unit) {
         Row(Modifier.padding(bottom = 14.dp).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Surf).padding(18.dp)) {
@@ -531,10 +536,21 @@ fun Setup(hub: Hub, name: String) {
                     FilterPill("Ouvrir ${s.name}", true) { hub.push(Screen.Login(name)) }
                 }
                 if (name != "AO3") Step(2, if (name == "FanFiction.net") "Ton profil" else "Ton pseudo", if (name == "FanFiction.net") "Colle le lien de ton profil." else "Exactement comme sur ton profil.") {
-                    Box(Modifier.offset(x = (-20).dp)) { SearchBox(v, if (name == "FanFiction.net") "fanfiction.net/u/…" else "Pseudo") { v = it } }
+                    val site = Sites.of(name)!!
+                    val fmtErr = if (v.isBlank()) null else site.format(v)
+                    Box(Modifier.offset(x = (-20).dp)) { SearchBox(v, if (name == "FanFiction.net") "fanfiction.net/u/…" else "Pseudo") { v = it; check = null } }
+                    fmtErr?.let { Text("✗ $it", color = Color(0xFFF87171), fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp)) }
+                    check?.let { (ok, msg) -> Text((if (ok) "✓ " else "✗ ") + msg, color = if (ok) Color(0xFF4ADE80) else Color(0xFFF87171), fontSize = 13.sp, lineHeight = 19.sp, modifier = Modifier.padding(top = 8.dp)) }
                     Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterPill("Enregistrer", true) { hub.saveSiteUser(name, v) }
-                        if (acc != null) FilterPill("Retirer", false) { hub.saveSiteUser(name, null) }
+                        FilterPill(if (checking) "Vérification…" else "Vérifier et enregistrer", fmtErr == null && v.isNotBlank()) {
+                            if (checking || v.isBlank() || fmtErr != null) return@FilterPill
+                            checking = true; check = null
+                            hub.scope.launch {
+                                check = try { val r = site.verify(v); hub.saveSiteUser(name, v); true to r } catch (e: Exception) { false to (e.message ?: "Vérification impossible") }
+                                checking = false
+                            }
+                        }
+                        if (acc != null) FilterPill("Retirer", false) { hub.saveSiteUser(name, null); check = null }
                     }
                 }
                 Step(if (name == "AO3") 2 else 3, "Synchroniser", "Récupère tes fanfictions. Tu peux changer de page pendant ce temps.") {

@@ -75,6 +75,10 @@ interface Site {
     suspend fun info(url: String): Work?
     suspend fun download(w: Work): Pair<List<String>, String>
     suspend fun library(user: String, known: Map<String, Work>): List<Work>
+    /** Erreur de format immédiate (null si le texte a la bonne forme). */
+    fun format(user: String): String?
+    /** Vérifie en ligne que le compte existe ; renvoie un résumé, ou lève une erreur lisible. */
+    suspend fun verify(user: String): String
 }
 
 object Sites {
@@ -145,25 +149,67 @@ object Wattpad : Site {
         return sb.toString()
     }
 
+    private fun enc(user: String) = URLEncoder.encode(user.trim().removePrefix("@"), "UTF-8")
+
+    private suspend fun lists(u: String): List<Pair<String, String>> {
+        val a = JSONObject(json("$B/api/v3/users/$u/lists?limit=100&fields=lists(id,name)")).optJSONArray("lists") ?: JSONArray()
+        return (0 until a.length()).map { a.getJSONObject(it).let { l -> l.get("id").toString() to l.optString("name").ifBlank { "Liste" } } }
+    }
+
+    private suspend fun listStories(id: String): List<JSONObject> {
+        val out = mutableListOf<JSONObject>()
+        var url: String? = "$B/api/v3/lists/$id/stories?limit=100&fields=stories($F),nextUrl"
+        var n = 0
+        while (url != null && n++ < 10) {
+            val o = JSONObject(json(url))
+            o.optJSONArray("stories")?.let { a -> for (i in 0 until a.length()) out += a.getJSONObject(i) }
+            url = o.optString("nextUrl").ifEmpty { null }?.let { if (it.startsWith("http")) it else B + it }
+        }
+        return out
+    }
+
     override suspend fun library(user: String, known: Map<String, Work>): List<Work> {
-        val u = URLEncoder.encode(user.trim().removePrefix("@"), "UTF-8")
+        val u = enc(user)
         val out = LinkedHashMap<String, Work>()
-        // Bibliothèque (nécessite d'être connecté), puis listes de lecture publiques.
+        fun put(w: Work) { out[w.id] = out[w.id]?.let { it.copy(sources = it.sources + w.sources) } ?: w }
+        // Bibliothèque (si connecté), puis chaque liste de lecture.
         runCatching {
             val a = JSONObject(json("$B/api/v3/users/$u/library?limit=200&fields=stories($F)")).optJSONArray("stories") ?: JSONArray()
-            for (i in 0 until a.length()) work(a.getJSONObject(i)).let { out[it.id] = it }
+            for (i in 0 until a.length()) put(work(a.getJSONObject(i)).copy(sources = setOf("Bibliothèque")))
         }
-        val lists = runCatching { JSONObject(json("$B/api/v3/users/$u/lists?limit=50&fields=lists(name,stories($F))")).optJSONArray("lists") }.getOrNull()
-        if (lists != null) for (i in 0 until lists.length()) {
-            val st = lists.getJSONObject(i).optJSONArray("stories") ?: continue
-            for (j in 0 until st.length()) work(st.getJSONObject(j)).let { out.putIfAbsent(it.id, it) }
+        runCatching { lists(u) }.getOrDefault(emptyList()).forEach { (id, name) ->
+            runCatching { listStories(id) }.getOrDefault(emptyList()).forEach { put(work(it).copy(sources = setOf("Liste : $name"))) }
         }
-        if (out.isEmpty()) error("aucune histoire trouvée pour « $user » (vérifie le pseudo et la connexion)")
+        if (out.isEmpty()) error("aucune histoire trouvée pour « $user » (bibliothèque et listes vides ou privées)")
         return out.values.toList()
+    }
+
+    override fun format(user: String) = when {
+        user.isBlank() -> "Entre ton pseudo"
+        user.trim().contains(' ') -> "Un pseudo Wattpad ne contient pas d'espace"
+        else -> null
+    }
+
+    override suspend fun verify(user: String): String {
+        val o = JSONObject(json("$B/api/v3/users/${enc(user)}?fields=username,name"))
+        val name = o.optString("username").ifEmpty { error("Pseudo « $user » introuvable sur Wattpad") }
+        val l = runCatching { lists(enc(user)) }.getOrDefault(emptyList())
+        return "Profil trouvé : @$name · ${l.size} liste" + (if (l.size > 1) "s" else "") + " de lecture" +
+            (if (l.isNotEmpty()) " (" + l.take(3).joinToString { it.second } + (if (l.size > 3) "…" else "") + ")" else "")
     }
 }
 
 object Ffn : Site {
+    override fun format(user: String) = if (Regex("\\d{3,}").containsMatchIn(user)) null else "Colle le lien de ton profil, ex. fanfiction.net/u/1234567"
+
+    override suspend fun verify(user: String): String {
+        val uid = Regex("(\\d{3,})").find(user)?.value ?: error("Numéro de profil introuvable dans le lien")
+        val d = Web.html("$B/u/$uid/")
+        if (d.title().contains("not exist", true) || d.selectFirst("#content_wrapper_inner") == null) error("Profil $uid introuvable sur FanFiction.net")
+        val name = d.title().substringBefore('|').trim().ifEmpty { "n°$uid" }
+        return "Profil trouvé : $name · ${d.select("div.favstories").size} histoires favorites"
+    }
+
     override val name = "FanFiction.net"
     override val home = "https://www.fanfiction.net/"
     override val userHint = "Lien ou numéro de ton profil (fanfiction.net/u/…)"
@@ -208,6 +254,19 @@ object Ffn : Site {
 }
 
 object Spirit : Site {
+    override fun format(user: String) = when {
+        user.isBlank() -> "Entre ton pseudo"
+        user.trim().contains(' ') -> "Un pseudo Spirit ne contient pas d'espace"
+        else -> null
+    }
+
+    override suspend fun verify(user: String): String {
+        val d = Web.html("$B/perfil/${URLEncoder.encode(user.trim(), "UTF-8")}")
+        val t = d.title()
+        if (t.contains("404") || t.contains("encontrad", true) || d.selectFirst("h1") == null) error("Pseudo « $user » introuvable sur Spirit")
+        return "Profil trouvé : ${d.selectFirst("h1")?.text() ?: user}"
+    }
+
     override val name = "Spirit Fanfics"
     override val home = "https://www.spiritfanfics.com/login"
     override val userHint = "Ton pseudo Spirit"
