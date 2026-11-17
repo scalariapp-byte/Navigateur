@@ -420,7 +420,7 @@ fun Library(hub: Hub) {
     val filters = listOf("Tout", "En cours", "Nouveautés", "Terminées", "Hors ligne")
     var col by remember(hub.site) { mutableStateOf<String?>(null) }
     val cols = hub.visible().flatMap { it.sources }.groupingBy { it }.eachCount().entries.sortedByDescending { it.value }
-    val list = hub.visible().filter { w -> (col == null || col in w.sources) &&
+    val list = hub.visible().filter { w -> col.let { c -> c == null || c in w.sources } &&
         (q.isBlank() || listOf(w.title, w.author, w.fandoms.joinToString(), w.tags.joinToString()).any { it.contains(q, true) }) && when (f) {
             1 -> w.progress > 0.01f && w.progress < 0.985f
             2 -> w.newChapters > 0
