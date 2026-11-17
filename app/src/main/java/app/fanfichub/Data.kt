@@ -46,6 +46,7 @@ class Store(private val dir: File) {
     fun text(id: String) = File(dir, "w_$id.html")
     fun titles(id: String) = File(dir, "t_$id.txt")
     fun fr(id: String) = File(dir, "w_${id}_fr.html")
+    fun clearFr() { dir.listFiles()?.filter { it.name.endsWith("_fr.html") }?.forEach { it.delete() } }
     fun frIds(): Set<String> = dir.list()?.filter { it.startsWith("w_") && it.endsWith("_fr.html") }?.map { it.removePrefix("w_").removeSuffix("_fr.html") }?.toSet() ?: emptySet()
     fun downloadedIds(): Set<String> = dir.list()?.filter { it.startsWith("w_") && it.endsWith(".html") && !it.endsWith("_fr.html") }
         ?.map { it.removePrefix("w_").removeSuffix(".html") }?.toSet() ?: emptySet()

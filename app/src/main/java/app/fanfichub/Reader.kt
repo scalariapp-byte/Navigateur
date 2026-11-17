@@ -75,6 +75,7 @@ fun Reader(hub: Hub, id: String) {
     val trProgress = hub.trProgress[id]
     val trError = hub.trError[id]
     LaunchedEffect(id) { hub.pretranslate(id) }
+    DisposableEffect(id) { onDispose { hub.dropFr(id) } }
     LaunchedEffect(wantFr, hub.hasFr(id)) { if (wantFr && hub.hasFr(id)) { fr = true; wantFr = false } }
     val t = THEMES[hub.theme]
     val bg = Color(t.second)

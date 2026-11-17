@@ -64,12 +64,15 @@ import java.net.URL
 import java.util.Calendar
 
 /** Noir pur (écran OLED : pixels éteints) ou anthracite. */
-var amoled by mutableStateOf(true)
-val Bg: Color get() = if (amoled) Color.Black else Color(0xFF0A0A0F)
-val Surf: Color get() = if (amoled) Color(0xFF0E0E13) else Color(0xFF15151E)
-val Surf2: Color get() = if (amoled) Color(0xFF19191F) else Color(0xFF1F1F2B)
-val Txt = Color(0xFFF4F4F8)
-val Mut = Color(0xFF8D8D9C)
+/** 0 = Noir (OLED), 1 = Sombre, 2 = Clair. */
+var themeMode by mutableIntStateOf(0)
+val isLight get() = themeMode == 2
+val Bg: Color get() = when (themeMode) { 0 -> Color.Black; 1 -> Color(0xFF0E0E14); else -> Color(0xFFF5F5F8) }
+val Surf: Color get() = when (themeMode) { 0 -> Color(0xFF0E0E13); 1 -> Color(0xFF17171F); else -> Color.White }
+val Surf2: Color get() = when (themeMode) { 0 -> Color(0xFF19191F); 1 -> Color(0xFF22222C); else -> Color(0xFFEBEBF1) }
+val Txt: Color get() = if (isLight) Color(0xFF15151B) else Color(0xFFF4F4F8)
+val Mut: Color get() = if (isLight) Color(0xFF6A6A77) else Color(0xFF8D8D9C)
+val Sub: Color get() = if (isLight) Color(0xFF3C3C46) else Sub
 val A1 = Color(0xFFA78BFA)
 val A2 = Color(0xFFF472B6)
 val Grad = Brush.linearGradient(listOf(A1, A2))
@@ -80,7 +83,14 @@ fun fmt(n: Int) = when { n >= 1_000_000 -> "%.1fM".format(n / 1e6); n >= 10_000 
 
 @Composable
 fun HubApp(hub: Hub) {
-    MaterialTheme(colorScheme = darkColorScheme(background = Bg, surface = Surf, primary = A1, onBackground = Txt, onSurface = Txt)) {
+    val view = androidx.compose.ui.platform.LocalView.current
+    SideEffect {
+        (view.context as? android.app.Activity)?.window?.let { win ->
+            androidx.core.view.WindowCompat.getInsetsController(win, view).apply { isAppearanceLightStatusBars = isLight; isAppearanceLightNavigationBars = isLight }
+        }
+    }
+    MaterialTheme(colorScheme = if (isLight) androidx.compose.material3.lightColorScheme(background = Bg, surface = Surf, primary = A1, onBackground = Txt, onSurface = Txt)
+        else darkColorScheme(background = Bg, surface = Surf, primary = A1, onBackground = Txt, onSurface = Txt)) {
         BackHandler(enabled = hub.stack.size > 1) { hub.pop() }
         Box(Modifier.fillMaxSize().background(Bg)) {
             AnimatedContent(
@@ -183,7 +193,7 @@ fun WorkCard(w: Work, modifier: Modifier = Modifier, onClick: () -> Unit) {
             Text(w.title, color = Txt, fontSize = 17.sp, fontWeight = FontWeight.Bold, lineHeight = 21.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(top = 8.dp))
             Text("par ${w.author.ifBlank { "?" }}", color = Mut, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (w.summary.isNotBlank()) Text(w.summary, color = Color(0xFFB4B4C2), fontSize = 13.sp, lineHeight = 18.sp, maxLines = 2,
+            if (w.summary.isNotBlank()) Text(w.summary, color = Sub, fontSize = 13.sp, lineHeight = 18.sp, maxLines = 2,
                 overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
             Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (w.words > 0) Text("${fmt(w.words)} mots", color = Mut, fontSize = 12.sp)
@@ -333,7 +343,7 @@ fun Title(small: String, big: String) {
 fun UpdateCard(hub: Hub) {
     Column(Modifier.padding(20.dp).fillMaxWidth().clip(RoundedCornerShape(26.dp)).background(Brush.linearGradient(listOf(A2.copy(alpha = 0.35f), A1.copy(alpha = 0.25f), Surf))).padding(22.dp)) {
         Text("Nouvelle version disponible", color = Txt, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-        Text("Version ${hub.newVersion} · tu as la ${hub.version}", color = Color(0xFFCFCFDA), fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp, bottom = 14.dp))
+        Text("Version ${hub.newVersion} · tu as la ${hub.version}", color = Sub, fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp, bottom = 14.dp))
         hub.updating?.let { Bar(it, Color.White, Modifier.padding(bottom = 12.dp)) }
         GradButton(hub.updating?.let { "Téléchargement… ${(it * 100).toInt()} %" } ?: "Mettre à jour") { hub.startUpdate() }
     }
@@ -488,69 +498,96 @@ fun Library(hub: Hub) {
 
 // ---------- Comptes ----------
 @Composable
+private fun Group(title: String, content: @Composable ColumnScope.() -> Unit) {
+    Text(title.uppercase(), color = Mut, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp, modifier = Modifier.padding(start = 26.dp, top = 26.dp, bottom = 8.dp))
+    Column(Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(Surf), content = content)
+}
+
+@Composable
+private fun Line() { Box(Modifier.padding(start = 70.dp).fillMaxWidth().height(1.dp).background(Surf2)) }
+
+@Composable
+private fun SettingRow(lead: @Composable () -> Unit, title: String, sub: String? = null, subColor: Color = Mut, trail: (@Composable () -> Unit)? = null, onClick: (() -> Unit)? = null) {
+    Row(Modifier.fillMaxWidth().then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier).padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) { lead() }
+        Column(Modifier.weight(1f).padding(start = 14.dp)) {
+            Text(title, color = Txt, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            sub?.let { Text(it, color = subColor, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+        }
+        trail?.invoke() ?: if (onClick != null) Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Mut) else Unit
+    }
+}
+
+@Composable
+private fun RoundIcon(icon: ImageVector, c: Color = A1) {
+    Box(Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(c.copy(alpha = 0.16f)), contentAlignment = Alignment.Center) { Icon(icon, null, tint = c, modifier = Modifier.size(22.dp)) }
+}
+
+@Composable
+private fun Switch(on: Boolean) {
+    Box(Modifier.width(48.dp).height(28.dp).clip(CircleShape).background(if (on) Grad else SolidColor(Surf2)).padding(3.dp),
+        contentAlignment = if (on) Alignment.CenterEnd else Alignment.CenterStart) { Box(Modifier.size(22.dp).clip(CircleShape).background(Color.White)) }
+}
+
+@Composable
 fun Accounts(hub: Hub) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 120.dp)) {
-        Title("COMPTES", "Tes sites")
-        Column(Modifier.padding(horizontal = 20.dp, vertical = 18.dp)) {
-            SITE_UI.forEach { s ->
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 130.dp)) {
+        Title("COMPTES", "Réglages")
+        Group("Comptes") {
+            SITE_UI.forEachIndexed { i, s ->
+                if (i > 0) Line()
                 val acc = hub.account(s.name)
-                Row(Modifier.padding(bottom = 12.dp).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Surf)
-                    .border(1.dp, if (acc != null) s.color.copy(alpha = 0.35f) else Color.Transparent, RoundedCornerShape(24.dp))
-                    .clickable { hub.push(Screen.Setup(s.name)) }.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    SiteLogo(s.name, 48)
-                    Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
-                        Text(s.name, color = Txt, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                        Text(acc?.let { "Connecté · $it" } ?: "Non connecté", color = if (acc != null) s.color else Mut, fontSize = 13.sp)
-                        hub.siteStatus[s.name]?.let { Text(it, color = if (it.startsWith("Erreur")) Color(0xFFF87171) else Mut, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                val st = hub.siteStatus[s.name]
+                SettingRow({ SiteLogo(s.name, 40) }, s.name,
+                    sub = st ?: acc?.let { "Connecté · " + it.substringAfterLast("/u/").trimEnd('/') } ?: "Non connecté",
+                    subColor = when { st?.startsWith("Erreur") == true -> Color(0xFFEF4444); acc != null -> s.color; else -> Mut }) { hub.push(Screen.Setup(s.name)) }
+            }
+        }
+        Group("Synchronisation") {
+            SettingRow({ RoundIcon(Icons.Default.Refresh) }, "Tout synchroniser", "Rapide : récupère les nouveautés") { hub.startSync() }
+            Line()
+            SettingRow({ RoundIcon(Icons.Default.Refresh, A2) }, "Synchronisation complète", "Relit tout et retire ce que tu as enlevé") { hub.startSync(full = true) }
+        }
+        Group("Apparence") {
+            Row(Modifier.padding(14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                listOf(Triple("Noir", Color.Black, Color(0xFFF4F4F8)), Triple("Sombre", Color(0xFF17171F), Color(0xFFF4F4F8)), Triple("Clair", Color(0xFFF5F5F8), Color(0xFF15151B)))
+                    .forEachIndexed { i, (name, bg, fg) ->
+                        Column(Modifier.weight(1f).clip(RoundedCornerShape(16.dp)).background(bg)
+                            .border(2.dp, if (themeMode == i) A1 else Color.Gray.copy(alpha = 0.25f), RoundedCornerShape(16.dp))
+                            .clickable { hub.setTheme(i) }.padding(vertical = 14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Box(Modifier.size(28.dp).clip(CircleShape).background(Grad))
+                            Text(name, color = fg, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                        }
                     }
-                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Mut)
-                }
             }
-            Box(Modifier.padding(top = 6.dp)) { GradButton(if (hub.syncing) "Synchronisation en cours…" else "Tout synchroniser") { hub.startSync() } }
-            Spacer(Modifier.height(10.dp))
-            GhostButton("Synchronisation complète") { hub.startSync(full = true) }
-            Text("La complète relit tout et retire ce que tu as enlevé de tes favoris.", color = Mut, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
-
-            Text("Apparence", color = Txt, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 30.dp, bottom = 12.dp))
-            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Surf).clickable { hub.setDark(!amoled) }.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("Noir pur", color = Txt, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                    Text("Pixels éteints sur les écrans OLED : plus contrasté, économise la batterie", color = Mut, fontSize = 12.sp)
-                }
-                Box(Modifier.width(48.dp).height(28.dp).clip(CircleShape).background(if (amoled) Grad else SolidColor(Surf2)).padding(3.dp),
-                    contentAlignment = if (amoled) Alignment.CenterEnd else Alignment.CenterStart) { Box(Modifier.size(22.dp).clip(CircleShape).background(Color.White)) }
-            }
-            Row(Modifier.padding(top = 10.dp).fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Surf).clickable { hub.toggleBookAnim(!hub.bookAnim) }.padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("Animation du livre", color = Txt, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                    Text("Le livre tombe de l'étagère et s'ouvre quand tu changes de site", color = Mut, fontSize = 12.sp)
-                }
-                Box(Modifier.width(48.dp).height(28.dp).clip(CircleShape).background(if (hub.bookAnim) Grad else SolidColor(Surf2)).padding(3.dp),
-                    contentAlignment = if (hub.bookAnim) Alignment.CenterEnd else Alignment.CenterStart) { Box(Modifier.size(22.dp).clip(CircleShape).background(Color.White)) }
-            }
-            Text("Lecture", color = Txt, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 24.dp, bottom = 12.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Line()
+            SettingRow({ RoundIcon(Icons.Default.Star) }, "Animation du livre", "Le volume tombe et s'ouvre", trail = { Switch(hub.bookAnim) }) { hub.toggleBookAnim(!hub.bookAnim) }
+        }
+        Group("Lecture") {
+            Row(Modifier.padding(14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 THEMES.forEachIndexed { i, (name, bg, fg) ->
-                    Column(Modifier.weight(1f).clip(RoundedCornerShape(18.dp)).background(Color(bg))
-                        .border(2.dp, if (hub.theme == i) A1 else Color.Transparent, RoundedCornerShape(18.dp)).clickable { hub.setReader(t = i) }.padding(vertical = 16.dp),
+                    Column(Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).background(Color(bg))
+                        .border(2.dp, if (hub.theme == i) A1 else Color.Gray.copy(alpha = 0.25f), RoundedCornerShape(14.dp)).clickable { hub.setReader(t = i) }.padding(vertical = 12.dp),
                         horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("Aa", color = Color(fg), fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                        Text(name, color = Color(fg).copy(alpha = 0.7f), fontSize = 12.sp)
+                        Text("Aa", color = Color(fg), fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        Text(name, color = Color(fg).copy(alpha = 0.7f), fontSize = 11.sp)
                     }
                 }
             }
-            Row(Modifier.padding(top = 12.dp).fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Surf).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("A−", color = Txt, fontSize = 18.sp, modifier = Modifier.clip(CircleShape).clickable { hub.setReader(s = hub.size - 1) }.padding(14.dp))
-                Text("Taille du texte : ${hub.size}", color = Mut, fontSize = 14.sp, modifier = Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                Text("A+", color = Txt, fontSize = 22.sp, modifier = Modifier.clip(CircleShape).clickable { hub.setReader(s = hub.size + 1) }.padding(14.dp))
+            Line()
+            Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Taille du texte", color = Txt, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Text("A−", color = Txt, fontSize = 17.sp, modifier = Modifier.clip(CircleShape).clickable { hub.setReader(s = hub.size - 1) }.padding(12.dp))
+                Text("${hub.size}", color = Mut, fontSize = 15.sp, modifier = Modifier.padding(horizontal = 4.dp))
+                Text("A+", color = Txt, fontSize = 21.sp, modifier = Modifier.clip(CircleShape).clickable { hub.setReader(s = hub.size + 1) }.padding(12.dp))
             }
-
-            Text("Application", color = Txt, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 30.dp, bottom = 12.dp))
-            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Surf).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Version ${hub.version}", color = Txt, fontSize = 15.sp, modifier = Modifier.weight(1f))
-                if (hub.newVersion != null) FilterPill(hub.updating?.let { "${(it * 100).toInt()} %" } ?: "Mettre à jour", true) { hub.startUpdate() }
-                else FilterPill("Vérifier", false) { hub.startCheck(manual = true) }
+        }
+        Group("Application") {
+            SettingRow({ RoundIcon(Icons.Default.Info) }, "Version ${hub.version}",
+                if (hub.newVersion != null) "Version ${hub.newVersion} disponible" else "Touche pour vérifier",
+                trail = { if (hub.newVersion != null) FilterPill(hub.updating?.let { "${(it * 100).toInt()} %" } ?: "Mettre à jour", true) { hub.startUpdate() } }) {
+                if (hub.newVersion != null) hub.startUpdate() else hub.startCheck(manual = true)
             }
         }
     }
@@ -588,7 +625,7 @@ fun Setup(hub: Hub, name: String) {
                 }
             }
             Column(Modifier.padding(20.dp).navigationBarsPadding()) {
-                Text(s.how, color = Color(0xFFCFCFDA), fontSize = 14.sp, lineHeight = 21.sp, modifier = Modifier.padding(bottom = 18.dp))
+                Text(s.how, color = Sub, fontSize = 14.sp, lineHeight = 21.sp, modifier = Modifier.padding(bottom = 18.dp))
                 if (Sites.of(name)?.searchable != true) Step(1, "Se connecter sur le site", "Une page du vrai site s'ouvre. Connecte-toi avec ton e-mail et ton mot de passe (le bouton Google ne marche pas ici).") {
                     FilterPill("Ouvrir ${s.name}", true) { hub.push(Screen.Login(name)) }
                 }
@@ -762,16 +799,17 @@ fun Detail(hub: Hub, id: String) {
                     GhostButton("Lire sur ${w.site} (dans l'app)") { hub.push(Screen.Web(w.link, w.title)) }
                     if (w.summary.isNotBlank()) {
                         var showFr by remember(id) { mutableStateOf(false) }
-                        LaunchedEffect(id) { if (hub.summaryFr[id] == null) runCatching { Translator.texts(listOf(w.summary)).first() }.onSuccess { hub.summaryFr[id] = it } }
-                        val sumFr = if (showFr) hub.summaryFr[id] else null
-                        val sumBusy = showFr && hub.summaryFr[id] == null
+                        var pre by remember(id) { mutableStateOf<String?>(null) } // préchargé, jamais enregistré
+                        LaunchedEffect(id) { runCatching { Translator.texts(listOf(w.summary)).first() }.onSuccess { pre = it } }
+                        val sumFr = if (showFr) pre else null
+                        val sumBusy = showFr && pre == null
                         Row(Modifier.padding(top = 28.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text("Résumé", color = Txt, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                             FilterPill(if (sumBusy) "Traduction…" else if (sumFr != null) "VO" else "Traduire", sumFr == null) {
                                 showFr = !showFr
                             }
                         }
-                        Text(sumFr ?: w.summary, color = Color(0xFFCFCFDA), fontSize = 15.sp, lineHeight = 23.sp)
+                        Text(sumFr ?: w.summary, color = Sub, fontSize = 15.sp, lineHeight = 23.sp)
                     }
                     if (w.tags.isNotEmpty()) {
                         Text("Tags", color = Txt, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 26.dp, bottom = 10.dp))

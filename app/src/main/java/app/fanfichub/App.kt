@@ -37,7 +37,7 @@ class Hub(ctx: Context) {
     private val app = ctx.applicationContext
     private val store = Store(ctx.filesDir)
     private val prefs = ctx.getSharedPreferences("hub", Context.MODE_PRIVATE)
-    val works = mutableStateListOf<Work>().apply { addAll(store.load()) }
+    val works = mutableStateListOf<Work>()
     val stack = mutableStateListOf<Screen>(Screen.Home)
     var tab by mutableIntStateOf(0)
     var user by mutableStateOf(prefs.getString("user", null)); private set
@@ -50,8 +50,14 @@ class Hub(ctx: Context) {
     var newVersion by mutableStateOf<Long?>(null); private set
     var updating by mutableStateOf<Float?>(null); private set
     val version = Updater.current(ctx)
-    init { amoled = prefs.getBoolean("amoled", true) }
-    fun setDark(v: Boolean) { amoled = v; prefs.edit().putBoolean("amoled", v).apply() }
+    /** Chargement des fanfictions hors du fil principal (ouverture instantanée) ; la synchro l'attend. */
+    private val loadJob = CoroutineScope(Dispatchers.Main.immediate).launch {
+        val l = withContext(Dispatchers.IO) { store.clearFr(); store.load() }
+        works.addAll(l)
+    }
+    suspend fun awaitLoad() = loadJob.join()
+    init { themeMode = prefs.getInt("themeMode", if (prefs.getBoolean("amoled", true)) 0 else 1) }
+    fun setTheme(m: Int) { themeMode = m; prefs.edit().putInt("themeMode", m).apply() }
     /** Les tâches longues vivent ici : changer d'écran ne les interrompt plus. */
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     var site by mutableStateOf(prefs.getString("site", null)); private set
@@ -109,7 +115,7 @@ class Hub(ctx: Context) {
     fun pop() { if (stack.size > 1) stack.removeAt(stack.lastIndex) }
     fun work(id: String) = works.firstOrNull { it.id == id }
     /** Recharge depuis le disque (la synchro d'arrière-plan a pu écrire entre-temps). */
-    fun reload() { if (!syncing) { val l = store.load(); if (l.isNotEmpty()) { works.clear(); works.addAll(l) } } }
+    fun reload() { if (!syncing && loadJob.isCompleted) { val l = store.load(); if (l.isNotEmpty()) { works.clear(); works.addAll(l) } } }
     fun update(w: Work) { val i = works.indexOfFirst { it.id == w.id }; if (i >= 0) works[i] = w else works += w; persist() }
     private var saveJob: kotlinx.coroutines.Job? = null
     /** Écriture disque groupée et hors du fil principal (plus de saccades). */
@@ -124,26 +130,25 @@ class Hub(ctx: Context) {
     fun logout() { CookieManager.getInstance().removeAllCookies(null); saveUser(null) }
     fun hasText(id: String) = id in downloaded
     fun text(id: String) = store.text(id).readText()
-    var frReady by mutableStateOf(store.frIds()); private set
-    fun hasFr(id: String) = id in frReady
+    /** Traduction préchargée en mémoire vive le temps de la lecture ; rien n'est enregistré. */
+    val frText = mutableStateMapOf<String, String>()
+    private val frJobs = HashMap<String, kotlinx.coroutines.Job>()
+    fun hasFr(id: String) = frText[id] != null
+    fun textFr(id: String) = frText[id] ?: ""
     val trProgress = mutableStateMapOf<String, Float>()
     val trError = mutableStateMapOf<String, String>()
-    /** Résumés traduits (mémoire), préparés dès l'ouverture d'une fiche. */
-    val summaryFr = mutableStateMapOf<String, String>()
     var webFr by mutableStateOf(prefs.getBoolean("webFr", false)); private set
     fun setWebFr(v: Boolean) { webFr = v; prefs.edit().putBoolean("webFr", v).apply() }
 
-    /** Traduction d'avance, en silence : prête quand on appuie sur « Traduire ». */
     fun pretranslate(id: String) {
-        if (hasFr(id) || id in trProgress || !hasText(id)) return
+        if (hasFr(id) || frJobs[id]?.isActive == true || !hasText(id)) return
         trProgress[id] = 0f; trError.remove(id)
-        scope.launch {
-            try { translate(id) { trProgress[id] = it }; frReady = frReady + id } catch (e: Exception) { trError[id] = e.message ?: "Traduction impossible" }
-            finally { trProgress.remove(id) }
+        frJobs[id] = scope.launch {
+            try { frText[id] = Translator.toFrench(text(id)) { trProgress[id] = it } } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) { trError[id] = e.message ?: "Traduction impossible" } finally { trProgress.remove(id) }
         }
     }
-    fun textFr(id: String) = store.fr(id).readText()
-    suspend fun translate(id: String, progress: (Float) -> Unit) { store.fr(id).writeText(Translator.toFrench(text(id), progress)) }
+    fun dropFr(id: String) { frJobs.remove(id)?.cancel(); frText.remove(id); trProgress.remove(id); trError.remove(id) }
     fun titles(id: String) = store.titles(id).takeIf { it.exists() }?.readLines() ?: emptyList()
 
     suspend fun detectUser() { withContext(Dispatchers.IO) { Ao3.username() }?.let { saveUser(it) } }
@@ -151,12 +156,13 @@ class Hub(ctx: Context) {
     suspend fun download(id: String) {
         val w = work(id) ?: return
         val (t, html) = if (w.site == "AO3") withContext(Dispatchers.IO) { Ao3.download(id) } else Sites.of(w.site)!!.download(w)
-        store.text(id).writeText(html); store.titles(id).writeText(t.joinToString("\n")); store.fr(id).delete(); frReady = frReady - id; downloaded = downloaded + id; pretranslate(id)
+        store.text(id).writeText(html); store.titles(id).writeText(t.joinToString("\n")); downloaded = downloaded + id
         work(id)?.let { update(it.copy(newChapters = 0)) }
     }
 
     /** Synchro incrémentale : s'arrête dès que les pages ne contiennent plus que des fanfictions connues et inchangées. */
     suspend fun sync(full: Boolean = false, only: String? = null, quick: Boolean = false) {
+        awaitLoad()
         val now = System.currentTimeMillis()
         fun fresh(w: Work) = quick && now - w.checked < 3 * 3_600_000L
         val u = user.takeIf { only == null || only == "AO3" }
