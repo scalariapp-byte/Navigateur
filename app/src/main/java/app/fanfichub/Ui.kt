@@ -96,6 +96,7 @@ fun HubApp(hub: Hub) {
                     is Screen.Setup -> Setup(hub, s.site)
                 }
             }
+            hub.intro?.let { BookIntro(it) { hub.intro = null } }
         }
     }
 }
@@ -240,7 +241,7 @@ fun SitePicker(hub: Hub) {
         SITE_UI.forEach { s ->
             Row(Modifier.padding(bottom = 12.dp).fillMaxWidth().clip(RoundedCornerShape(26.dp))
                 .background(Brush.linearGradient(listOf(s.color.copy(alpha = 0.28f), Surf, Surf))).border(1.dp, s.color.copy(alpha = 0.25f), RoundedCornerShape(26.dp))
-                .clickable { hub.pickSite(s.name); if (hub.account(s.name) == null) hub.push(Screen.Setup(s.name)) }.padding(18.dp),
+                .clickable { hub.pickSite(s.name, animate = true); if (hub.account(s.name) == null) hub.push(Screen.Setup(s.name)) }.padding(18.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 SiteLogo(s.name, 54)
                 Column(Modifier.weight(1f).padding(start = 16.dp)) {
@@ -268,7 +269,7 @@ fun SiteChips(hub: Hub) {
         items(SITE_UI, key = { it.name }) { s ->
             val on = hub.site == s.name
             val n = hub.works.count { it.site == s.name }
-            Row(Modifier.clip(CircleShape).background(if (on) s.color.copy(alpha = 0.95f) else Surf2).clickable { hub.pickSite(s.name) }
+            Row(Modifier.clip(CircleShape).background(if (on) s.color.copy(alpha = 0.95f) else Surf2).clickable { hub.pickSite(s.name, animate = true) }
                 .padding(start = 6.dp, end = 16.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 SiteLogo(s.name, 28)
                 Text("${if (s.name == "FanFiction.net") "FF.net" else s.name.substringBefore(' ')} · $n", color = if (on) Color.White else Mut,
@@ -500,6 +501,15 @@ fun Accounts(hub: Hub) {
                 }
                 Box(Modifier.width(48.dp).height(28.dp).clip(CircleShape).background(if (amoled) Grad else SolidColor(Surf2)).padding(3.dp),
                     contentAlignment = if (amoled) Alignment.CenterEnd else Alignment.CenterStart) { Box(Modifier.size(22.dp).clip(CircleShape).background(Color.White)) }
+            }
+            Row(Modifier.padding(top = 10.dp).fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Surf).clickable { hub.setBookAnim(!hub.bookAnim) }.padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Animation du livre", color = Txt, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Le livre tombe de l'étagère et s'ouvre quand tu changes de site", color = Mut, fontSize = 12.sp)
+                }
+                Box(Modifier.width(48.dp).height(28.dp).clip(CircleShape).background(if (hub.bookAnim) Grad else SolidColor(Surf2)).padding(3.dp),
+                    contentAlignment = if (hub.bookAnim) Alignment.CenterEnd else Alignment.CenterStart) { Box(Modifier.size(22.dp).clip(CircleShape).background(Color.White)) }
             }
             Text("Lecture", color = Txt, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 24.dp, bottom = 12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {

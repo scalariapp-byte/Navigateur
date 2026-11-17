@@ -56,7 +56,13 @@ class Hub(ctx: Context) {
     var site by mutableStateOf(prefs.getString("site", null)); private set
     var syncProgress by mutableStateOf<Float?>(null)
     val siteStatus = mutableStateMapOf<String, String>()
-    fun pickSite(s: String) { site = s; prefs.edit().putString("site", s).apply() }
+    var intro by mutableStateOf<String?>(null)
+    var bookAnim by mutableStateOf(prefs.getBoolean("bookAnim", true)); private set
+    fun setBookAnim(v: Boolean) { bookAnim = v; prefs.edit().putBoolean("bookAnim", v).apply() }
+    fun pickSite(s: String, animate: Boolean = false) {
+        if (animate && bookAnim && s != "ALL" && s != site) intro = s
+        site = s; prefs.edit().putString("site", s).apply()
+    }
     fun account(s: String) = if (s == "AO3") user else users[s]
     fun startSync(full: Boolean = false, only: String? = null) { scope.launch { sync(full, only) } }
     fun startUpdate() { scope.launch { doUpdate() } }
