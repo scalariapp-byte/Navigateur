@@ -597,15 +597,24 @@ fun Setup(hub: Hub, name: String) {
                 if (site0?.searchable == true) Step(1, "Trouve ton compte", "Tape ton pseudo ou ton nom, puis appuie sur ton profil dans la liste.") {
                     var results by remember { mutableStateOf<List<Account>>(emptyList()) }
                     var searching by remember { mutableStateOf(false) }
+                    var searchErr by remember { mutableStateOf<String?>(null) }
                     LaunchedEffect(v) {
+                        searchErr = null
                         if (v.trim().length < 2 || v == acc) { results = emptyList(); return@LaunchedEffect }
                         delay(600); searching = true
-                        results = runCatching { site0.searchUsers(v) }.getOrDefault(emptyList())
+                        val r = kotlinx.coroutines.withTimeoutOrNull(30_000) { runCatching { site0.searchUsers(v) } }
+                        results = r?.getOrNull() ?: emptyList()
+                        searchErr = when {
+                            r == null -> "Le site ne répond pas (vérification anti-robot ?). Ouvre-le une fois ci-dessous, ou colle le lien de ton profil."
+                            r.isFailure -> r.exceptionOrNull()?.message ?: "Recherche impossible"
+                            else -> null
+                        }
                         searching = false
                     }
                     Box(Modifier.offset(x = (-20).dp)) { SearchBox(v, "Pseudo ou nom") { v = it; check = null } }
                     when {
                         searching -> Text("Recherche…", color = Mut, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+                        searchErr != null -> Text("✗ $searchErr", color = Color(0xFFF87171), fontSize = 13.sp, lineHeight = 18.sp, modifier = Modifier.padding(top = 8.dp))
                         v.trim().length >= 2 && v != acc && results.isEmpty() -> Text("✗ Aucun compte trouvé", color = Color(0xFFF87171), fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
                     }
                     results.forEach { a ->

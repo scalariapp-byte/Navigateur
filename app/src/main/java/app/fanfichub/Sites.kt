@@ -30,19 +30,21 @@ import kotlin.coroutines.resume
  * de type Cloudflare quand elles n'exigent pas de clic) puis renvoie le HTML.
  */
 object Web {
-    @SuppressLint("StaticFieldLeak") private var wv: WebView? = null
     lateinit var app: Context
-    private val lock = Mutex()
+    /** Un navigateur par usage : la synchro et les recherches de l'écran ne s'attendent pas. */
+    private class Lane { @SuppressLint("StaticFieldLeak") var wv: WebView? = null; val lock = Mutex() }
+    private val lanes = HashMap<String, Lane>()
+    private fun lane(name: String) = synchronized(lanes) { lanes.getOrPut(name) { Lane() } }
 
     @SuppressLint("SetJavaScriptEnabled")
-    suspend fun html(url: String): Document = Jsoup.parse(load(url, json = false), url)
+    suspend fun html(url: String, lane: String = "sync"): Document = Jsoup.parse(load(url, json = false, lane = lane), url)
 
     /** Texte brut de la page (réponses JSON des API), via le vrai navigateur et sa session. */
-    suspend fun text(url: String): String = load(url, json = true)
+    suspend fun text(url: String, lane: String = "sync"): String = load(url, json = true, lane = lane)
 
-    private suspend fun load(url: String, json: Boolean): String = lock.withLock {
+    private suspend fun load(url: String, json: Boolean, lane: String): String = lane(lane).let { l -> l.lock.withLock {
         val raw = withContext(Dispatchers.Main) {
-            val w = wv ?: WebView(app).apply { settings.javaScriptEnabled = true; settings.domStorageEnabled = true }.also { wv = it }
+            val w = l.wv ?: WebView(app).apply { settings.javaScriptEnabled = true; settings.domStorageEnabled = true }.also { l.wv = it }
             withTimeoutOrNull(60_000) {
                 suspendCancellableCoroutine<String> { cont ->
                     var tries = 0
@@ -67,7 +69,7 @@ object Web {
         if (title.contains("Just a moment", true) || title.contains("Attention Required", true))
             error("Le site demande une vérification : ouvre-le une fois via « Ouvrir le site » dans l'onglet Compte")
         raw.substringAfter('\u0001')
-    }
+    } }
 }
 
 /** Compte trouvé par une recherche : [id] est la valeur enregistrée, [handle] ce qu'on affiche. */
@@ -125,7 +127,7 @@ object Wattpad : Site {
     /** Mis à vrai pour forcer le passage par le navigateur intégré (si les requêtes directes ne donnent rien). */
     private var slow = false
 
-    private suspend fun json(u: String): String {
+    private suspend fun json(u: String, lane: String = "sync"): String {
         if (!slow) {
             val direct = withContext(Dispatchers.IO) {
                 runCatching {
@@ -137,10 +139,10 @@ object Wattpad : Site {
             val isError = direct != null && Regex("^\\{\\s*\"(error|error_type|code|message)\"").containsMatchIn(direct)
             if (direct != null && !isError && (direct.startsWith("{") || direct.startsWith("["))) return direct
         }
-        return slowJson(u)
+        return slowJson(u, lane)
     }
 
-    private suspend fun slowJson(u: String): String = Web.text(u).trim().also {
+    private suspend fun slowJson(u: String, lane: String = "sync"): String = Web.text(u, lane).trim().also {
         if (!it.startsWith("{") && !it.startsWith("[")) error("Wattpad a renvoyé une page inattendue (connecte-toi via « Se connecter sur le site »)")
     }
 
@@ -239,10 +241,10 @@ object Wattpad : Site {
     override suspend fun searchUsers(q: String): List<Account> {
         val e = URLEncoder.encode(q.trim().removePrefix("@"), "UTF-8")
         val out = LinkedHashMap<String, Account>()
-        runCatching { findUsers(JSONTokener(json("$B/api/v3/users/$e?fields=username,name,avatar,numLists,numFollowers,numStoriesPublished")).nextValue()) }
+        runCatching { findUsers(JSONTokener(json("$B/api/v3/users/$e?fields=username,name,avatar,numLists,numFollowers,numStoriesPublished", "ui")).nextValue()) }
             .getOrDefault(emptyList()).forEach { out[it.id.lowercase()] = it }
         for (u in listOf("$B/v4/search/users/?query=$e&limit=15&fields=username,name,avatar,numLists,numFollowers,numStoriesPublished", "$B/api/v3/users?query=$e&limit=15")) {
-            val r = runCatching { findUsers(JSONTokener(json(u)).nextValue()) }.getOrDefault(emptyList())
+            val r = runCatching { findUsers(JSONTokener(json(u, "ui")).nextValue()) }.getOrDefault(emptyList())
             r.forEach { out.putIfAbsent(it.id.lowercase(), it) }
             if (r.isNotEmpty()) break
         }
@@ -256,7 +258,7 @@ object Wattpad : Site {
     }
 
     override suspend fun verify(user: String): String {
-        val o = JSONObject(json("$B/api/v3/users/${enc(user)}?fields=username,name"))
+        val o = JSONObject(json("$B/api/v3/users/${enc(user)}?fields=username,name", "ui"))
         val name = o.optString("username").ifEmpty { error("Pseudo « $user » introuvable sur Wattpad") }
         val l = runCatching { lists(enc(user)) }.getOrDefault(emptyList())
         return "Profil trouvé : @$name · ${l.size} liste" + (if (l.size > 1) "s" else "") + " de lecture" +
@@ -271,7 +273,7 @@ object Ffn : Site {
     override suspend fun searchUsers(q: String): List<Account> {
         val t = q.trim()
         Regex("/u/(\\d+)").find(t)?.groupValues?.get(1)?.let { id -> return listOf(Account("$B/u/$id", "Profil n°$id", "Lien collé", "", "")) }
-        val d = Web.html("$B/search/?ready=1&type=writer&keywords=${URLEncoder.encode(t, "UTF-8")}")
+        val d = Web.html("$B/search/?ready=1&type=writer&keywords=${URLEncoder.encode(t, "UTF-8")}", "ui")
         val root = d.selectFirst("#content_wrapper_inner") ?: d.body()
         return root.select("a[href^=/u/]").mapNotNull { a ->
             val id = Regex("/u/(\\d+)").find(a.attr("href"))?.groupValues?.get(1) ?: return@mapNotNull null
@@ -285,7 +287,7 @@ object Ffn : Site {
 
     override suspend fun verify(user: String): String {
         val uid = Regex("(\\d{3,})").find(user)?.value ?: error("Numéro de profil introuvable dans le lien")
-        val d = Web.html("$B/u/$uid/")
+        val d = Web.html("$B/u/$uid/", "ui")
         if (d.title().contains("not exist", true) || d.selectFirst("#content_wrapper_inner") == null) error("Profil $uid introuvable sur FanFiction.net")
         val name = d.title().substringBefore('|').trim().ifEmpty { "n°$uid" }
         return "Profil trouvé : $name · ${d.select("div.favstories").size} histoires favorites"
@@ -342,7 +344,7 @@ object Spirit : Site {
     }
 
     override suspend fun verify(user: String): String {
-        val d = Web.html("$B/perfil/${URLEncoder.encode(user.trim(), "UTF-8")}")
+        val d = Web.html("$B/perfil/${URLEncoder.encode(user.trim(), "UTF-8")}", "ui")
         val t = d.title()
         if (t.contains("404") || t.contains("encontrad", true) || d.selectFirst("h1") == null) error("Pseudo « $user » introuvable sur Spirit")
         return "Profil trouvé : ${d.selectFirst("h1")?.text() ?: user}"

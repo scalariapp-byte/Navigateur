@@ -114,7 +114,7 @@ fun BookRows(works: List<Work>, onBook: (Work) -> Unit) {
     }
 }
 
-/** Une étagère = une collection (liste de lecture, fandom…) : jusqu'à 3 rangées, le reste via « Tout voir ». */
+/** Une étagère = une collection (liste de lecture, fandom…) : une rangée de 4, le reste via « Tout voir ». */
 @Composable
 fun BookShelf(title: String, works: List<Work>, onAll: () -> Unit, onBook: (Work) -> Unit) {
     Column(Modifier.padding(bottom = 14.dp)) {
@@ -123,10 +123,10 @@ fun BookShelf(title: String, works: List<Work>, onAll: () -> Unit, onBook: (Work
                 Text(title, color = Txt, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text("${works.size} histoire" + if (works.size > 1) "s" else "", color = Mut, fontSize = 12.sp)
             }
-            if (works.size > 12) Text("Tout voir ›", color = A1, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+            if (works.size > 4) Text("Tout voir ›", color = A1, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.clip(CircleShape).clickable(onClick = onAll).padding(horizontal = 10.dp, vertical = 6.dp))
         }
-        BookRows(works.take(12), onBook)
+        BookRows(works.take(4), onBook)
     }
 }
 
