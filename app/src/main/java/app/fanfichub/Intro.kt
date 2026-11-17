@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.layout.RowScope
 
 private val Wood = Color(0xFF4A3426)
 private val Paper = Color(0xFFF3EBDD)
@@ -115,4 +116,91 @@ fun BookIntro(site: String, onDone: () -> Unit) {
                 .offset(y = floorY - 70.dp - 30.dp * open.value).graphicsLayer { alpha = open.value })
         }
     }
+}
+
+/** Accueil : une bibliothèque en bois avec un livre par site. Toucher un livre le fait tomber et s'ouvrir. */
+@Composable
+fun Shelf(hub: Hub) {
+    BoxWithConstraints(Modifier.fillMaxSize().background(Bg)) {
+        val w = maxWidth
+        Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(horizontal = 20.dp)) {
+            Text("FANFIC HUB", style = androidx.compose.ui.text.TextStyle(brush = Grad, fontSize = 13.sp, fontWeight = FontWeight.Black, letterSpacing = 3.sp),
+                modifier = Modifier.padding(top = 26.dp))
+            Text("Choisis un livre", color = Txt, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(top = 6.dp))
+            Text("Chaque livre est un site. Touche-le pour l'ouvrir.", color = Mut, fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp, bottom = 26.dp))
+
+            // Meuble : deux planches
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Brush.verticalGradient(listOf(Color(0xFF2A1C14), Color(0xFF1C130D))))
+                .padding(horizontal = 14.dp, vertical = 16.dp)) {
+                ShelfRow {
+                    Deco(18, 150, Color(0xFF5A3B6B)); Deco(14, 170, Color(0xFF2F5A3B))
+                    SITE_UI.take(2).forEach { SiteBook(hub, it.name, 210) }
+                    Deco(16, 160, Color(0xFF8A3B3B))
+                }
+                Plank()
+                Spacer(Modifier.height(22.dp))
+                ShelfRow {
+                    Deco(16, 165, Color(0xFF3B4F8A))
+                    SITE_UI.drop(2).forEach { SiteBook(hub, it.name, 200) }
+                    AllBook(hub)
+                }
+                Plank()
+            }
+            Spacer(Modifier.weight(1f))
+            Text("Comptes, réglages et synchro : dans l'onglet Comptes une fois un livre ouvert.", color = Mut, fontSize = 12.sp, lineHeight = 17.sp,
+                modifier = Modifier.padding(bottom = 16.dp))
+        }
+    }
+}
+
+@Composable
+private fun ShelfRow(content: @Composable RowScope.() -> Unit) {
+    Row(Modifier.fillMaxWidth().height(220.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally), content = content)
+}
+
+@Composable
+private fun Plank() {
+    Box(Modifier.fillMaxWidth().height(12.dp).clip(RoundedCornerShape(3.dp)).background(Brush.verticalGradient(listOf(Color(0xFF6B4A33), Wood, Color(0xFF2E2018)))))
+}
+
+@Composable
+private fun Deco(width: Int, height: Int, c: Color) {
+    Box(Modifier.width(width.dp).height(height.dp).clip(RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp))
+        .background(Brush.horizontalGradient(listOf(c.copy(alpha = 0.55f), c.copy(alpha = 0.35f), c.copy(alpha = 0.55f)))))
+}
+
+@Composable
+private fun Spine(name: String, color: Brush, height: Int, sub: String, logo: (@Composable () -> Unit)?, onClick: () -> Unit) {
+    val press = remember { Animatable(0f) }
+    val scope = rememberCoroutineScope()
+    Column(Modifier.width(58.dp).height(height.dp).graphicsLayer { translationY = -14f * press.value * density }
+        .clip(RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp, bottomStart = 2.dp, bottomEnd = 2.dp)).background(color)
+        .clickable { scope.launch { press.animateTo(1f, tween(140)); onClick(); press.snapTo(0f) } },
+        horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(Modifier.padding(top = 10.dp).fillMaxWidth().height(3.dp).background(Color(0xFFE8C26A).copy(alpha = 0.8f)))
+        Box(Modifier.padding(top = 8.dp)) { logo?.invoke() }
+        Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Text(name, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, softWrap = false, maxLines = 1,
+                modifier = Modifier.wrapContentSize(unbounded = true).graphicsLayer { rotationZ = -90f })
+        }
+        Text(sub, color = Color.White.copy(alpha = 0.85f), fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 6.dp))
+        Box(Modifier.padding(bottom = 10.dp).fillMaxWidth().height(3.dp).background(Color(0xFFE8C26A).copy(alpha = 0.8f)))
+    }
+}
+
+@Composable
+private fun SiteBook(hub: Hub, site: String, height: Int) {
+    val s = siteUi(site)
+    Spine(if (site == "FanFiction.net") "FF.net" else site.substringBefore(' '), Brush.horizontalGradient(listOf(s.color.copy(alpha = 0.75f), s.color, s.color.copy(alpha = 0.7f))),
+        height, "${hub.works.count { it.site == site }}", { SiteLogo(site, 34) }) {
+        hub.showShelf = false
+        hub.pickSite(site, animate = true)
+        hub.tab = 0
+        if (hub.account(site) == null) hub.push(Screen.Setup(site))
+    }
+}
+
+@Composable
+private fun AllBook(hub: Hub) {
+    Spine("Tout", Grad, 180, "${hub.works.size}", null) { hub.showShelf = false; hub.pickSite("ALL"); hub.tab = 0 }
 }

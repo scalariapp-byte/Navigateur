@@ -57,10 +57,12 @@ class Hub(ctx: Context) {
     var syncProgress by mutableStateOf<Float?>(null)
     val siteStatus = mutableStateMapOf<String, String>()
     var intro by mutableStateOf<String?>(null)
+    /** L'étagère s'affiche à chaque ouverture de l'app. */
+    var showShelf by mutableStateOf(true)
     var bookAnim by mutableStateOf(prefs.getBoolean("bookAnim", true)); private set
     fun toggleBookAnim(v: Boolean) { bookAnim = v; prefs.edit().putBoolean("bookAnim", v).apply() }
     fun pickSite(s: String, animate: Boolean = false) {
-        if (animate && bookAnim && s != "ALL" && s != site) intro = s
+        if (animate && bookAnim && s != "ALL") intro = s
         site = s; prefs.edit().putString("site", s).apply()
     }
     fun account(s: String) = if (s == "AO3") user else users[s]

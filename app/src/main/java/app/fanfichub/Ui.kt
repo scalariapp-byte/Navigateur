@@ -303,7 +303,7 @@ fun SyncPill(hub: Hub, modifier: Modifier) {
 fun Home(hub: Hub) {
     LaunchedEffect(Unit) { hub.startCheck(); if (hub.syncDue()) hub.startSync() }
     LaunchedEffect(hub.pendingImport) { hub.pendingImport?.let { hub.pendingImport = null; hub.startImport(it) } }
-    if (hub.site == null) { SitePicker(hub); return }
+    if (hub.site == null || hub.showShelf) { Shelf(hub); return }
     Box(Modifier.fillMaxSize()) {
         PullToRefreshBox(isRefreshing = false, onRefresh = { hub.startSync(only = hub.site?.takeIf { it != "ALL" }) }, modifier = Modifier.fillMaxSize()) {
             when (hub.tab) { 0 -> Feed(hub); 1 -> Library(hub); else -> Accounts(hub) }
@@ -375,7 +375,12 @@ fun Feed(hub: Hub) {
     val reading = list.filter { it.progress > 0.01f && it.progress < 0.985f }.sortedByDescending { it.lastRead }
     val h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 120.dp)) {
-        item { Title("FANFIC HUB", (if (h in 5..17) "Bonjour" else "Bonsoir") + (hub.user?.let { ", $it" } ?: "")) }
+        item {
+            Box {
+                Title("FANFIC HUB", (if (h in 5..17) "Bonjour" else "Bonsoir") + (hub.user?.let { ", $it" } ?: ""))
+                Box(Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(top = 18.dp, end = 16.dp)) { FilterPill("Étagère", false) { hub.showShelf = true } }
+            }
+        }
         item { SiteChips(hub) }
         if (hub.newVersion != null) item { UpdateCard(hub) }
         item { SiteStateCard(hub) }
