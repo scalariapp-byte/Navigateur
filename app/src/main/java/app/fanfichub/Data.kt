@@ -3,6 +3,7 @@ package app.fanfichub
 import android.webkit.CookieManager
 import org.json.JSONArray
 import org.json.JSONObject
+import org.jsoup.HttpStatusException
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
@@ -53,8 +54,29 @@ object Ao3 {
         ?.mapNotNull { c -> c.trim().split("=", limit = 2).takeIf { it.size == 2 }?.let { it[0] to it[1] } }?.toMap() ?: emptyMap()
 
     private fun get(path: String): Document {
-        Thread.sleep(800)
-        return Jsoup.connect(if (path.startsWith("http")) path else BASE + path).userAgent(UA).cookies(cookies()).timeout(30000).get()
+        var wait = 350L
+        repeat(4) { i ->
+            Thread.sleep(wait)
+            try {
+                return Jsoup.connect(if (path.startsWith("http")) path else BASE + path).userAgent(UA).cookies(cookies()).timeout(30000).get()
+            } catch (e: HttpStatusException) {
+                if (e.statusCode != 429 && e.statusCode != 503) throw e
+                wait = 6000L * (i + 1) // AO3 demande de ralentir
+            }
+        }
+        error("AO3 limite les requêtes, réessaie dans quelques minutes")
+    }
+
+    /** Une page de blurbs : (fanfictions, lien de la page suivante). */
+    fun page(url: String, src: String): Pair<List<Work>, String?> {
+        val d = get(url)
+        return d.select("li.blurb").mapNotNull { blurb(it, src) } to d.selectFirst("ol.pagination li.next a[href]")?.attr("href")
+    }
+
+    fun subsPage(url: String): Pair<List<String>, String?> {
+        val d = get(url)
+        return d.select("#main dt a[href^=/works/]").map { it.attr("href").removePrefix("/works/").substringBefore('/') } to
+            d.selectFirst("ol.pagination li.next a[href]")?.attr("href")
     }
 
     private fun num(s: String?) = s?.filter { it.isDigit() }?.toIntOrNull() ?: 0

@@ -52,35 +52,66 @@ class Hub(ctx: Context) {
         work(id)?.let { update(it.copy(newChapters = 0)) }
     }
 
-    suspend fun sync() {
+    /** Synchro incrémentale : s'arrête dès que les pages ne contiennent plus que des fanfictions connues et inchangées. */
+    suspend fun sync(full: Boolean = false) {
         val u = user ?: run { status = "Connecte ton compte AO3 pour synchroniser"; return }
         if (syncing) return
-        syncing = true; status = "Synchronisation avec AO3…"
+        syncing = true
+        val old = works.associateBy { it.id }
+        val seen = LinkedHashMap<String, Work>()
+        fun add(w: Work) { seen[w.id] = seen[w.id]?.let { it.copy(sources = it.sources + w.sources) } ?: w }
+        fun unchanged(w: Work) = old[w.id]?.let { it.chapters == w.chapters && it.updated == w.updated } == true
+        fun publish() {
+            val merged = LinkedHashMap<String, Work>()
+            if (!full) old.values.forEach { merged[it.id] = it }
+            seen.values.forEach { f ->
+                val o = old[f.id]
+                merged[f.id] = if (o == null) f else f.copy(newChapters = o.newChapters + maxOf(0, f.published - o.published),
+                    progress = o.progress, lastRead = o.lastRead, sources = if (full) f.sources else o.sources + f.sources)
+            }
+            works.clear(); works.addAll(merged.values); store.save(works)
+        }
+        suspend fun pages(start: String, src: String, max: Int, stop: (List<Work>) -> Boolean) {
+            var url: String? = start; var n = 0
+            while (url != null && n++ < max) {
+                val (list, next) = withContext(Dispatchers.IO) { Ao3.page(url!!, src) }
+                list.forEach { add(it) }; publish()
+                status = "$src… ${seen.size} fanfictions"
+                if (!full && stop(list)) break
+                url = next
+            }
+        }
         try {
-            val fresh = withContext(Dispatchers.IO) {
-                val m = LinkedHashMap<String, Work>()
-                fun add(w: Work) { m[w.id] = m[w.id]?.let { it.copy(sources = it.sources + w.sources) } ?: w }
-                runCatching { Ao3.list("/users/$u/bookmarks", "Favori") }.getOrDefault(emptyList()).forEach { add(it) }
-                runCatching { Ao3.list("/users/$u/readings?show=to-read", "À lire") }.getOrDefault(emptyList()).forEach { add(it) }
-                runCatching { Ao3.subscriptionIds(u) }.getOrDefault(emptyList()).forEach { id ->
-                    val known = m[id]
-                    if (known != null) m[id] = known.copy(sources = known.sources + "Abonnement") else Ao3.work(id, "Abonnement")?.let { add(it) }
+            // 1. Favoris triés par date de mise à jour de l'œuvre : tout ce qui suit une œuvre inchangée est inchangé.
+            pages("/users/$u/bookmarks?bookmark_search%5Bsort_column%5D=bookmarkable_date", "Favori", 40) { l -> l.any { unchanged(it) } }
+            // 2. Nouveaux favoris (tri par date d'ajout) jusqu'au premier déjà connu.
+            if (!full) pages("/users/$u/bookmarks", "Favori", 10) { l -> l.any { it.id in old } }
+            // 3. À lire plus tard.
+            runCatching { pages("/users/$u/readings?show=to-read", "À lire", if (full) 20 else 3) { l -> l.all { unchanged(it) } } }
+            // 4. Abonnements : on ne revérifie pas les fanfictions terminées.
+            val ids = mutableListOf<String>(); var url: String? = "/users/$u/subscriptions?type=works"; var n = 0
+            while (url != null && n++ < 15) { val (l, next) = withContext(Dispatchers.IO) { Ao3.subsPage(url!!) }; ids += l; url = next }
+            ids.distinct().forEachIndexed { i, id ->
+                val known = seen[id] ?: old[id]
+                when {
+                    seen[id] != null -> add(seen[id]!!.copy(sources = setOf("Abonnement")))
+                    known != null && known.complete && !full -> add(known.copy(sources = known.sources + "Abonnement"))
+                    else -> withContext(Dispatchers.IO) { Ao3.work(id, "Abonnement") }?.let { add(it) }
                 }
-                m.values.toList()
+                status = "Abonnements ${i + 1}/${ids.distinct().size}"
+                if (i % 5 == 4) publish()
             }
-            if (fresh.isEmpty()) { status = "Rien trouvé : vérifie la connexion à ton compte"; return }
-            val old = works.associateBy { it.id }
-            val merged = fresh.map { f ->
-                val o = old[f.id] ?: return@map f
-                f.copy(newChapters = o.newChapters + maxOf(0, f.published - o.published), progress = o.progress, lastRead = o.lastRead)
-            }
-            works.clear(); works.addAll(merged); store.save(works)
-            val n = merged.count { it.newChapters > 0 }
-            status = "${merged.size} fanfictions · " + if (n == 0) "tout est à jour" else "$n avec de nouveaux chapitres"
+            publish()
+            prefs.edit().putLong("lastSync", System.currentTimeMillis()).apply()
+            val nw = works.count { it.newChapters > 0 }
+            status = "${works.size} fanfictions · " + if (nw == 0) "tout est à jour" else "$nw avec de nouveaux chapitres"
         } catch (e: Exception) {
-            status = "Échec : ${e.message ?: "réseau indisponible"}"
+            publish()
+            status = "Synchro interrompue : ${e.message ?: "réseau indisponible"}"
         } finally { syncing = false }
     }
+
+    fun syncDue() = user != null && System.currentTimeMillis() - prefs.getLong("lastSync", 0) > 20 * 60_000
 }
 
 class MainActivity : ComponentActivity() {

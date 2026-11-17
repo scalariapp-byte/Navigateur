@@ -200,6 +200,7 @@ fun ContinueCard(w: Work, onClick: () -> Unit) {
 @Composable
 fun Home(hub: Hub) {
     val scope = rememberCoroutineScope()
+    LaunchedEffect(Unit) { if (hub.syncDue()) hub.sync() }
     Box(Modifier.fillMaxSize()) {
         PullToRefreshBox(isRefreshing = hub.syncing, onRefresh = { scope.launch { hub.sync() } }, modifier = Modifier.fillMaxSize()) {
             when (hub.tab) { 0 -> Feed(hub); 1 -> Library(hub); else -> Account(hub) }
@@ -344,6 +345,8 @@ fun Account(hub: Hub) {
             } else {
                 GradButton(if (hub.syncing) "Synchronisation…" else "Synchroniser maintenant") { scope.launch { hub.sync() } }
                 Spacer(Modifier.height(10.dp))
+                GhostButton("Synchronisation complète") { scope.launch { hub.sync(full = true) } }
+                Text("Relit tout et retire les fanfictions que tu as enlevées de tes favoris.", color = Mut, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp, bottom = 10.dp))
                 GhostButton("Se déconnecter") { hub.logout() }
             }
             Text("Lecture", color = Txt, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 30.dp, bottom = 12.dp))
