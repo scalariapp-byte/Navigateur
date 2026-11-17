@@ -124,6 +124,9 @@ object Ao3 {
         return out.distinct()
     }
 
+    /** Nombre de chapitres publiés, via la page sommaire (bien plus légère que la fanfiction). */
+    fun chapterCount(id: String): Int? = runCatching { get("/works/$id/navigate?view_adult=true").select("ol.chapter.index li").size.takeIf { it > 0 } }.getOrNull()
+
     fun work(id: String, src: String): Work? = runCatching {
         val d = get("/works/$id?view_adult=true")
         val ch = d.selectFirst("dl.stats dd.chapters")?.text() ?: "1/1"

@@ -14,6 +14,11 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 
 sealed interface Screen {
@@ -77,6 +82,8 @@ class Hub(ctx: Context) {
     fun push(s: Screen) { stack += s }
     fun pop() { if (stack.size > 1) stack.removeAt(stack.lastIndex) }
     fun work(id: String) = works.firstOrNull { it.id == id }
+    /** Recharge depuis le disque (la synchro d'arrière-plan a pu écrire entre-temps). */
+    fun reload() { if (!syncing) { val l = store.load(); if (l.isNotEmpty()) { works.clear(); works.addAll(l) } } }
     fun update(w: Work) { val i = works.indexOfFirst { it.id == w.id }; if (i >= 0) works[i] = w else works += w; store.save(works) }
     fun saveUser(u: String?) { user = u?.trim()?.ifEmpty { null }; prefs.edit().putString("user", user).apply() }
     fun setReader(t: Int = theme, s: Int = size) { theme = t; size = s.coerceIn(14, 30); prefs.edit().putInt("theme", theme).putInt("size", size).apply() }
@@ -135,16 +142,31 @@ class Hub(ctx: Context) {
             // 4. Abonnements : on ne revérifie pas les fanfictions terminées.
             val ids = mutableListOf<String>(); var url: String? = "/users/$u/subscriptions?type=works"; var n = 0
             while (url != null && n++ < 15) { val (l, next) = withContext(Dispatchers.IO) { Ao3.subsPage(url!!) }; ids += l; url = next }
-            ids.distinct().forEachIndexed { i, id ->
-                val known = seen[id] ?: old[id]
-                when {
-                    seen[id] != null -> add(seen[id]!!.copy(sources = setOf("Abonnement")))
-                    known != null && known.complete && !full -> add(known.copy(sources = known.sources + "Abonnement"))
-                    else -> withContext(Dispatchers.IO) { Ao3.work(id, "Abonnement") }?.let { add(it) }
-                }
-                status = "Abonnements ${i + 1}/${ids.distinct().size}"
-                if (i % 5 == 4) publish()
+            val todo = ids.distinct()
+            val sem = Semaphore(4); var done = 0
+            coroutineScope {
+                todo.map { id ->
+                    async {
+                        sem.withPermit {
+                            val inSeen = seen[id]; val known = inSeen ?: old[id]
+                            val w: Work? = when {
+                                inSeen != null -> inSeen.copy(sources = setOf("Abonnement"))
+                                known != null && known.complete && !full -> known.copy(sources = known.sources + "Abonnement")
+                                known != null && !full -> {
+                                    val n = withContext(Dispatchers.IO) { Ao3.chapterCount(id) }
+                                    if (n != null && n <= known.published) known.copy(sources = known.sources + "Abonnement")
+                                    else withContext(Dispatchers.IO) { Ao3.work(id, "Abonnement") }
+                                }
+                                else -> withContext(Dispatchers.IO) { Ao3.work(id, "Abonnement") }
+                            }
+                            w?.let { add(it) }
+                            done++; status = "Abonnements $done/${todo.size}"
+                            if (done % 8 == 0) publish()
+                        }
+                    }
+                }.awaitAll()
             }
+            publish()
           }
             // 5. Autres sites : bibliothèque du compte puis fanfictions suivies non terminées.
             for (s in Sites.all) {
@@ -179,7 +201,12 @@ class MainActivity : ComponentActivity() {
         hub = Hub(this)
         handle(intent)
         setContent { HubApp(hub) }
+        BackgroundSync.schedule(this)
+        if (android.os.Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED)
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
     }
+
+    override fun onResume() { super.onResume(); if (::hub.isInitialized) hub.reload() }
 
     private lateinit var hub: Hub
     private fun handle(i: Intent?) { if (i?.action == Intent.ACTION_SEND) i.getStringExtra(Intent.EXTRA_TEXT)?.let { hub.pendingImport = it } }
