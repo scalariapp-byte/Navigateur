@@ -287,12 +287,12 @@ object Ffn : Site {
 
     override suspend fun verify(user: String): String {
         val uid = Regex("(\\d{3,})").find(user)?.value ?: error("Numéro de profil introuvable dans le lien")
-        val d = Web.html("$B/u/$uid/", "ui")
+        val d = Web.html("$M/u/$uid/?a=fs", "ui")
         val txt = d.text()
         if (d.title().contains("not exist", true) || txt.contains("User does not exist", true) || txt.contains("User is no longer an active member", true))
             error("Profil $uid introuvable sur FanFiction.net")
         val name = d.title().substringBefore('|').trim().takeIf { it.isNotEmpty() && !it.contains("FanFiction", true) } ?: "n°$uid"
-        return "Profil trouvé : $name · ${d.select("div.favstories, div.z-list.favstories").size} histoires favorites visibles"
+        return "Profil trouvé : $name · ${d.select("a[href^=/s/]").map { it.attr("href").substringBefore("/", "").ifEmpty { it.attr("href") } }.distinct().size.coerceAtLeast(d.select("div.favstories").size)} histoires favorites sur la 1re page"
     }
 
     override val name = "FanFiction.net"
@@ -300,41 +300,85 @@ object Ffn : Site {
     override val userHint = "Lien ou numéro de ton profil (fanfiction.net/u/…)"
     private const val B = "https://www.fanfiction.net"
     override fun owns(url: String) = "fanfiction.net" in url
-    private fun stat(t: String, k: String) = Regex("$k:\\s*([\\d,]+)").find(t)?.groupValues?.get(1)
+    private const val M = "https://m.fanfiction.net"
+    private val IC = RegexOption.IGNORE_CASE
     private fun date(sec: String) = sec.toLongOrNull()?.let { SimpleDateFormat("dd/MM/yyyy", Locale.FRANCE).format(Date(it * 1000)) } ?: ""
+
+    /** « words: 45k+ » → 45000 ; « words: 1,234 » → 1234. */
+    private fun words(t: String): Int {
+        val m = Regex("words?:\\s*([\\d.,]+)\\s*(k|m)?", IC).find(t) ?: return 0
+        val n = m.groupValues[1].replace(",", "").toDoubleOrNull() ?: return 0
+        return (n * when (m.groupValues[2].lowercase()) { "k" -> 1_000; "m" -> 1_000_000; else -> 1 }).toInt()
+    }
+    private fun chaptersOf(t: String) = Regex("chapters?:\\s*(\\d+)", IC).find(t)?.groupValues?.get(1)?.toIntOrNull() ?: 1
+    private fun favsOf(t: String) = Regex("favs?:\\s*([\\d,]+)", IC).find(t)?.groupValues?.get(1)?.replace(",", "")?.toIntOrNull() ?: 0
+    private fun completeOf(t: String) = Regex("\\bcomplete\\b", IC).containsMatchIn(t)
+    private fun ratedOf(t: String) = Regex("rated:\\s*(?:fiction\\s*)?([KTM]\\+?)", IC).find(t)?.groupValues?.get(1)
+        ?: Regex(",\\s*([KTM]\\+?)\\s*,").find(t)?.groupValues?.get(1) ?: ""
+
+    private fun work(id: String, title: String, author: String, fandom: String, meta: String, summary: String = "") : Work {
+        val n = chaptersOf(meta); val done = completeOf(meta)
+        return Work("ffn:$id", title.ifBlank { "Histoire $id" }, author, listOf(fandom.ifBlank { name }), ratedOf(meta), words(meta),
+            "$n/${if (done) n else "?"}", favsOf(meta), summary, emptyList(), Regex("updated:\\s*([^,]+)", IC).find(meta)?.groupValues?.get(1)?.trim() ?: "",
+            done, setOf("Favori"), site = name, url = "$B/s/$id", checked = System.currentTimeMillis())
+    }
 
     override suspend fun info(url: String): Work? {
         val id = Regex("/s/(\\d+)").find(url)?.groupValues?.get(1) ?: return null
-        val d = Web.html("$B/s/$id/1/")
-        val top = d.selectFirst("#profile_top") ?: error("Page FanFiction.net illisible")
-        val st = top.selectFirst("span.xgray")?.text() ?: ""
-        val n = digits(stat(st, "Chapters")).coerceAtLeast(1)
-        val done = "Status: Complete" in st
-        return Work("ffn:$id", top.selectFirst("b.xcontrast_txt")?.text() ?: "Sans titre", top.selectFirst("a[href^=/u/]")?.text() ?: "",
-            listOf(d.select("#pre_story_links a").lastOrNull()?.text() ?: name), Regex("Rated:\\s*(?:Fiction\\s*)?(\\S+)").find(st)?.groupValues?.get(1) ?: "",
-            digits(stat(st, "Words")), "$n/${if (done) n else "?"}", digits(stat(st, "Favs")), top.selectFirst("div.xcontrast_txt")?.text() ?: "",
-            emptyList(), Regex("Updated:\\s*([^-]+)").find(st)?.groupValues?.get(1)?.trim() ?: "", done, setOf("Favori"), site = name, url = "$B/s/$id")
+        val d = Web.html("$M/s/$id/1/")
+        val text = d.text()
+        if (!Regex("chapters?:|words?:|rated:", IC).containsMatchIn(text)) error("page FanFiction.net illisible (vérification anti-robot ?)")
+        // Titre de page : « Titre Chapter 1, a Naruto fanfic | FanFiction »
+        val pageTitle = d.title()
+        val title = d.selectFirst("#profile_top b.xcontrast_txt, #content b")?.text()?.ifBlank { null }
+            ?: pageTitle.substringBefore(" | ").substringBefore(" Chapter ").substringBefore(", a ").trim()
+        val fandom = d.select("#pre_story_links a").lastOrNull()?.text() ?: Regex(", an? (.+?) fanfic", IC).find(pageTitle)?.groupValues?.get(1) ?: name
+        val metaEl = d.select("span.xgray, div.gray, .gray, div").firstOrNull { Regex("words?:", IC).containsMatchIn(it.ownText()) || Regex("words?:", IC).containsMatchIn(it.text()) && it.text().length < 600 }
+        return work(id, title, d.selectFirst("a[href^=/u/]")?.text() ?: "", fandom, metaEl?.text() ?: text.take(2000),
+            d.selectFirst("#profile_top div.xcontrast_txt")?.text() ?: "")
     }
 
     override suspend fun download(w: Work): Pair<List<String>, String> {
         val id = w.id.removePrefix("ffn:")
-        val first = Web.html("$B/s/$id/1/")
-        val titles = first.selectFirst("select#chap_select")?.select("option")?.map { it.text() } ?: listOf("")
-        return sections(titles.mapIndexed { i, t ->
-            val d = if (i == 0) first else Web.html("$B/s/$id/${i + 1}/")
-            t to (d.selectFirst("#storytext")?.html() ?: "")
+        val first = Web.html("$M/s/$id/1/")
+        val n = maxOf(w.published, chaptersOf(first.text()))
+        val names = first.selectFirst("select#chap_select")?.select("option")?.map { it.text() } ?: emptyList()
+        return sections((1..n).map { i ->
+            val d = if (i == 1) first else Web.html("$M/s/$id/$i/")
+            (names.getOrNull(i - 1) ?: "Chapitre $i") to (d.selectFirst("#storycontent, #storytext, .storycontent, .storytext")?.html() ?: mainText(d))
         })
     }
 
+    /** Favoris : page mobile « ?a=fs » (le navigateur intégré y est redirigé), paginée ; repli sur la version ordinateur. */
     override suspend fun library(user: String, known: Map<String, Work>): List<Work> {
-        val uid = Regex("(\\d+)").find(user)?.value ?: return emptyList()
-        return Web.html("$B/u/$uid/").select("div.favstories").mapNotNull { e ->
-            val id = e.attr("data-storyid").ifEmpty { return@mapNotNull null }
-            val n = e.attr("data-chapters").toIntOrNull() ?: 1; val done = e.attr("data-statusid") == "2"
-            Work("ffn:$id", e.attr("data-title"), e.select("a[href^=/u/]").firstOrNull()?.text() ?: "", listOf(e.attr("data-category").ifEmpty { name }), "",
-                e.attr("data-wordcount").toIntOrNull() ?: 0, "$n/${if (done) n else "?"}", 0, e.selectFirst("div.z-indent")?.ownText() ?: "", emptyList(),
-                date(e.attr("data-dateupdate")), done, setOf("Favori"), site = name, url = "$B/s/$id")
+        val uid = Regex("(\\d{3,})").find(user)?.value ?: return emptyList()
+        val out = LinkedHashMap<String, Work>()
+        for (p in 1..40) {
+            val d = Web.html("$M/u/$uid/?a=fs&p=$p")
+            var added = 0
+            d.select("a[href^=/s/]").forEach { a ->
+                val id = Regex("^/s/(\\d+)").find(a.attr("href"))?.groupValues?.get(1) ?: return@forEach
+                if (id in out || a.text().isBlank()) return@forEach
+                val box = generateSequence(a.parent()) { it.parent() }.firstOrNull { it.text().length > a.text().length + 20 || it.tagName() == "div" } ?: a.parent() ?: return@forEach
+                val meta = box.selectFirst(".gray, .xgray, .z-padtop2")?.text() ?: box.text()
+                val fandom = meta.substringBefore(",").takeIf { it.length in 2..60 && !it.contains(":") } ?: ""
+                out[id] = work(id, a.text(), box.selectFirst("a[href^=/u/]")?.text() ?: "", fandom, meta)
+                added++
+            }
+            if (added == 0) break
         }
+        if (out.isEmpty()) {
+            // Repli : version ordinateur (blocs « favstories » avec attributs data-*)
+            Web.html("$B/u/$uid/").select("div.favstories").forEach { e ->
+                val id = e.attr("data-storyid").ifEmpty { return@forEach }
+                val n = e.attr("data-chapters").toIntOrNull() ?: 1; val done = e.attr("data-statusid") == "2"
+                out[id] = Work("ffn:$id", e.attr("data-title"), e.select("a[href^=/u/]").firstOrNull()?.text() ?: "", listOf(e.attr("data-category").ifEmpty { name }), "",
+                    e.attr("data-wordcount").toIntOrNull() ?: 0, "$n/${if (done) n else "?"}", 0, e.selectFirst("div.z-indent")?.ownText() ?: "", emptyList(),
+                    date(e.attr("data-dateupdate")), done, setOf("Favori"), site = name, url = "$B/s/$id")
+            }
+        }
+        if (out.isEmpty()) error("aucune histoire favorite trouvée sur le profil $uid (vérification anti-robot ? ouvre le site une fois)")
+        return out.values.toList()
     }
 }
 
