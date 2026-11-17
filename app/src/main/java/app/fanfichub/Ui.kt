@@ -107,7 +107,7 @@ fun HubApp(hub: Hub) {
                     is Screen.Web -> WebScreen(hub, s.url, s.title)
                 }
             }
-            hub.intro?.let { s -> BookIntro(s) { hub.intro = null; hub.enterSite(s) } }
+            hub.intro?.let { s -> BookIntro(s, remember(hub.works.size) { hub.works.groupingBy { it.site }.eachCount() }) { hub.intro = null; hub.enterSite(s) } }
         }
     }
 }

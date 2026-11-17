@@ -92,24 +92,54 @@ private fun Plank(modifier: Modifier) {
     }
 }
 
-/** Couverture du manga au sol, vue en perspective, qui s'ouvre. */
+/** Lignes de texte d'une page. */
+@Composable
+private fun PageLines(mirror: Boolean = false) {
+    Column(Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 16.dp).graphicsLayer { if (mirror) rotationY = 180f },
+        verticalArrangement = Arrangement.spacedBy(9.dp)) {
+        repeat(12) { i -> Box(Modifier.fillMaxWidth(if (i % 4 == 3) 0.55f else 1f).height(3.dp).clip(CircleShape).background(Color(0x2E000000))) }
+    }
+}
+
+/**
+ * Volume 3D posé au sol, vu en perspective : 4e de couverture, bloc de pages (épaisseur visible),
+ * couverture qui pivote puis pages qui se tournent une à une.
+ */
 @Composable
 private fun OpenManga(site: String, vol: Int, open: Float, bounce: Float, modifier: Modifier) {
     val s = siteUi(site)
+    val W = 132; val H = 186; val thick = 10
     Box(modifier.graphicsLayer {
-        rotationX = 50f; cameraDistance = 14f * density
-        scaleX = 0.88f + 0.12f * bounce; scaleY = 0.88f + 0.12f * bounce
-        translationX = size.width * 0.5f * open
+        rotationX = 48f; cameraDistance = 16f * density
+        val k = 0.82f + 0.18f * bounce; scaleX = k; scaleY = k
+        translationX = (W / 2f) * density * open // la reliure se recentre quand le livre s'ouvre
     }) {
-        Column(Modifier.width(132.dp).height(186.dp).clip(RoundedCornerShape(topEnd = 5.dp, bottomEnd = 5.dp)).background(Paper).padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            repeat(11) { i -> Box(Modifier.fillMaxWidth(if (i % 4 == 3) 0.55f else 1f).height(3.dp).clip(CircleShape).background(Color(0x30000000))) }
+        // 4e de couverture (dessous) + épaisseur du bloc de pages
+        Box(Modifier.offset(x = 3.dp, y = thick.dp).size(W.dp, H.dp).clip(RoundedCornerShape(5.dp)).background(s.color.shade(0.45f)))
+        Column(Modifier.offset(y = H.dp).width(W.dp).height(thick.dp).background(Brush.verticalGradient(listOf(Paper, Color(0xFFCFC3AE)))),
+            verticalArrangement = Arrangement.SpaceEvenly) {
+            repeat(3) { Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0x22000000))) }
         }
-        val back = open > 0.5f
-        Box(Modifier.width(132.dp).height(186.dp).graphicsLayer {
-            transformOrigin = TransformOrigin(0f, 0.5f); rotationY = -178f * open; cameraDistance = 14f * density
+        Box(Modifier.offset(x = W.dp).width(thick.dp).height((H + thick).dp)
+            .background(Brush.horizontalGradient(listOf(Color(0xFFE9DFCC), Color(0xFFBFB29C)))))
+        // Page de droite (texte final)
+        Box(Modifier.size(W.dp, H.dp).clip(RoundedCornerShape(topEnd = 5.dp, bottomEnd = 5.dp)).background(Paper)) { PageLines() }
+        // Pages qui se tournent après la couverture
+        for (p in 3 downTo 0) {
+            val t = ((open - 0.25f - p * 0.14f) / 0.45f).coerceIn(0f, 1f)
+            Box(Modifier.size(W.dp, H.dp).graphicsLayer {
+                transformOrigin = TransformOrigin(0f, 0.5f); rotationY = -178f * t; cameraDistance = 16f * density
+            }.clip(RoundedCornerShape(4.dp)).background(Brush.horizontalGradient(listOf(Color(0xFFE8DDC9), Paper)))) {
+                PageLines(mirror = t > 0.5f)
+            }
+        }
+        // Couverture
+        val c = (open / 0.45f).coerceIn(0f, 1f)
+        val back = c > 0.5f
+        Box(Modifier.size(W.dp, H.dp).graphicsLayer {
+            transformOrigin = TransformOrigin(0f, 0.5f); rotationY = -178f * c; cameraDistance = 16f * density
         }.clip(RoundedCornerShape(5.dp))
-            .background(if (back) Brush.linearGradient(listOf(Paper, Color(0xFFE3D6C0))) else Brush.linearGradient(listOf(s.color.light(0.1f), s.color.shade(0.35f))))
+            .background(if (back) Brush.linearGradient(listOf(Color(0xFFEDE3D1), Color(0xFFD9CBB2))) else Brush.linearGradient(listOf(s.color.light(0.12f), s.color.shade(0.35f))))
             .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(5.dp))) {
             if (!back) {
                 Box(Modifier.fillMaxWidth().height(30.dp).background(Color(0xFFF7F3EA)), contentAlignment = Alignment.Center) {
@@ -121,6 +151,8 @@ private fun OpenManga(site: String, vol: Int, open: Float, bounce: Float, modifi
                 }
                 Text("VOL. $vol", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Black,
                     modifier = Modifier.align(Alignment.BottomEnd).padding(10.dp).clip(RoundedCornerShape(4.dp)).background(Color(0xFF141414)).padding(horizontal = 6.dp, vertical = 3.dp))
+                // Reliure
+                Box(Modifier.fillMaxHeight().width(6.dp).background(Brush.horizontalGradient(listOf(Color.Black.copy(alpha = 0.35f), Color.Transparent))))
             }
         }
     }
@@ -146,7 +178,7 @@ private fun ShelfScene(counts: Map<String, Int>, auto: String?, header: Boolean,
         fall.animateTo(1f, tween(600, easing = CubicBezierEasing(0.55f, 0f, 1f, 0.5f)))  // gravité
         landed = true
         bounce.animateTo(1f, spring(dampingRatio = 0.35f, stiffness = 520f))
-        open.animateTo(1f, tween(780, easing = FastOutSlowInEasing))
+        open.animateTo(1f, tween(1500, easing = FastOutSlowInEasing))
         delay(420)
         fade.animateTo(0f, tween(240))
         onFinished(f)
@@ -186,9 +218,9 @@ private fun ShelfScene(counts: Map<String, Int>, auto: String?, header: Boolean,
             }
         }
         if (landed) falling?.let { f ->
-            OpenManga(f, counts[f] ?: 0, open.value, bounce.value, Modifier.align(Alignment.TopCenter).offset(x = (-66).dp, y = floorY - 120.dp))
+            OpenManga(f, counts[f] ?: 0, open.value, bounce.value, Modifier.align(Alignment.TopCenter).offset(y = floorY - 120.dp))
             Text(siteUi(f).name, color = Txt, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.align(Alignment.TopCenter)
-                .offset(y = floorY - 190.dp - 26.dp * open.value).graphicsLayer { alpha = open.value })
+                .offset(y = floorY + 120.dp - 16.dp * open.value).graphicsLayer { alpha = open.value })
         }
         if (onAll != null && falling == null) Text("Tout voir", color = A1, fontSize = 16.sp, fontWeight = FontWeight.Bold,
             modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 24.dp).clip(CircleShape).clickable { onAll() }.padding(14.dp))
@@ -209,8 +241,8 @@ fun Shelf(hub: Hub) {
 
 /** Animation quand on change de site depuis les logos. */
 @Composable
-fun BookIntro(site: String, onDone: () -> Unit) {
-    ShelfScene(emptyMap(), auto = site, header = false, onAll = null) { onDone() }
+fun BookIntro(site: String, counts: Map<String, Int>, onDone: () -> Unit) {
+    ShelfScene(counts, auto = site, header = false, onAll = null) { onDone() }
 }
 
 /** Étagère de l'accueil : toujours visible ; toucher un volume le fait tomber puis ouvre le site. */
