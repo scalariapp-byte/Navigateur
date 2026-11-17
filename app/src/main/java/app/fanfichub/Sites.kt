@@ -241,7 +241,42 @@ object Wattpad : Site {
 
     private val listCache = HashMap<String, List<ListHit>>()
     private fun hit(o: JSONObject) = ListHit(o.get("id").toString(), o.optString("name"), o.optInt("numStories"),
-        o.optJSONObject("user")?.optString("name") ?: "", o.optString("cover"))
+        o.optJSONObject("user")?.optString("name") ?: "", o.optString("cover"), o.optInt("numStories"))
+
+    private fun norm(s: String) = java.text.Normalizer.normalize(s.lowercase(), java.text.Normalizer.Form.NFD).replace(Regex("[^a-z0-9]"), "")
+    /** L'histoire porte-t-elle le(s) tag(s) cherché(s) ? (tous les mots, accents/majuscules/# ignorés) */
+    fun tagged(tags: List<String>, title: String, q: String): Boolean {
+        val words = q.split(Regex("[\\s,]+")).map(::norm).filter { it.isNotEmpty() }
+        return words.isNotEmpty() && words.all { t -> tags.any { norm(it).contains(t) } || norm(title).contains(t) }
+    }
+
+    /**
+     * Listes de tout Wattpad contenant des histoires avec ce tag. Robots en parallèle :
+     * 1) histoires #tag (8 pages), 2) listes de leurs auteurs, 3) lecture de chaque liste et comptage des histoires taguées.
+     * Les listes trouvées arrivent au fil de l'eau via [onHit].
+     */
+    suspend fun scanLists(tag: String, onProgress: (String) -> Unit, onHit: (ListHit) -> Unit) = coroutineScope {
+        val bots = Semaphore(10)
+        val stories = (0 until 8).map { p -> async { bots.withPermit { runCatching { searchStories(tag, p * 20) }.getOrDefault(emptyList()) } } }.awaitAll().flatten()
+        if (stories.isEmpty()) error("aucune histoire #$tag trouvée")
+        val authors = stories.map { it.author }.filter { it.isNotBlank() }.distinctBy { it.lowercase() }.take(80)
+        onProgress("${stories.size} histoires · lecture des listes de ${authors.size} auteurs…")
+        val lists = authors.map { u -> async { bots.withPermit { runCatching {
+            val a = JSONObject(json("$B/api/v3/users/${enc(u)}/lists?limit=50&fields=lists(id,name,numStories,cover,user(name))", "ui")).optJSONArray("lists") ?: JSONArray()
+            (0 until a.length()).map { hit(a.getJSONObject(it)) }
+        }.getOrDefault(emptyList()) } } }.awaitAll().flatten().distinctBy { it.id }.filter { it.total in 1..1000 }.take(250)
+        val done = java.util.concurrent.atomic.AtomicInteger()
+        onProgress("Analyse de ${lists.size} listes…")
+        lists.map { h -> async { bots.withPermit {
+            val n = runCatching {
+                val a = JSONObject(json("$B/api/v3/lists/${h.id}/stories?limit=100&fields=stories(id,title,tags)", "ui")).optJSONArray("stories") ?: JSONArray()
+                (0 until a.length()).count { i -> a.getJSONObject(i).let { o ->
+                    val t = o.optJSONArray("tags"); tagged(if (t == null) emptyList() else (0 until t.length()).map { t.optString(it) }, o.optString("title"), tag) } }
+            }.getOrDefault(0)
+            if (n > 0) onHit(h.copy(count = n))
+            onProgress("Analyse : ${done.incrementAndGet()}/${lists.size} listes")
+        } } }.awaitAll()
+    }
 
     /**
      * Listes de lecture correspondant à une recherche. Wattpad n'a pas de recherche de listes publique fiable :

@@ -118,7 +118,7 @@ fun SearchTab(hub: Hub) {
                 .border(1.dp, Surf2, RoundedCornerShape(18.dp)).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.Search, null, tint = Mut)
                 Box(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                    if (q.text.isEmpty()) Text(if (q.site == "Wattpad" && q.wpLists) "Tag : luffy, nami…" else "Titre, personnage, thème…", color = Mut, fontSize = 16.sp)
+                    if (q.text.isEmpty()) Text(if (q.site == "Wattpad" && q.wpLists) "Tag : luffy, nami… (tout Wattpad)" else "Titre, personnage, thème…", color = Mut, fontSize = 16.sp)
                     BasicTextField(q.text, { hub.query = q.copy(text = it) }, singleLine = true, textStyle = TextStyle(color = Txt, fontSize = 16.sp),
                         cursorBrush = SolidColor(A1), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                         keyboardActions = KeyboardActions(onSearch = { go() }), modifier = Modifier.fillMaxWidth())
@@ -149,7 +149,7 @@ fun SearchTab(hub: Hub) {
         if (q.site == "Wattpad") item {
             Row(Modifier.padding(start = 20.dp, top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Choice("Histoires", !q.wpLists) { hub.query = q.copy(wpLists = false) }
-                Choice("Mes listes (par tag)", q.wpLists) { hub.query = q.copy(wpLists = true) }
+                Choice("Listes par tag", q.wpLists) { hub.query = q.copy(wpLists = true) }
             }
         }
         // Filtres actifs (AO3 : fandom / personnage choisis)
@@ -207,7 +207,7 @@ fun SearchTab(hub: Hub) {
                 Box(Modifier.size(width = 48.dp, height = 64.dp).clip(RoundedCornerShape(6.dp)).background(Surf2)) { if (h.cover.isNotBlank()) NetFill(h.cover) }
                 Column(Modifier.weight(1f).padding(start = 14.dp)) {
                     Text(h.name, color = Txt, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Text("${h.count} histoire" + (if (h.count > 1) "s" else "") + if (h.user.isNotBlank()) " · @${h.user}" else "", color = Mut, fontSize = 13.sp)
+                    Text("${h.count} histoire" + (if (h.count > 1) "s" else "") + " #" + q.text.trim() + (if (h.total > 0) " sur ${h.total}" else "") + if (h.user.isNotBlank()) " · @${h.user}" else "", color = Mut, fontSize = 13.sp)
                 }
                 Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Mut)
             }
@@ -226,8 +226,9 @@ fun SearchTab(hub: Hub) {
         }
         when {
             hub.searching -> item {
-                Row(Modifier.fillMaxWidth().padding(24.dp), horizontalArrangement = Arrangement.Center) {
+                Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     androidx.compose.material3.CircularProgressIndicator(Modifier.size(26.dp), color = A1, strokeWidth = 2.5.dp)
+                    hub.searchInfo?.let { Text(it, color = Mut, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp)) }
                 }
             }
             hub.searchErr != null -> item { Empty(hub.searchErr!!) }

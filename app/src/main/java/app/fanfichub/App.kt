@@ -135,27 +135,21 @@ class Hub(ctx: Context) {
         searchJob?.cancel()
         if (!more) { results.clear(); listHits.clear(); openedList = null; searchPage = 1 } else searchPage++
         if (q.site == "Wattpad" && q.wpLists) {
-            // Recherche par tag dans MES listes de lecture (local, instantané)
-            fun norm(s: String) = java.text.Normalizer.normalize(s.lowercase(), java.text.Normalizer.Form.NFD).replace(Regex("[^a-z0-9]"), "")
-            val words = q.text.split(Regex("[\\s,]+")).map(::norm).filter { it.isNotEmpty() }
-            searchErr = null
-            if (words.isEmpty()) return
-            val hits = works.filter { w -> w.site == "Wattpad" && words.all { t -> w.tags.any { norm(it).contains(t) } || norm(w.title).contains(t) } }
-            localLists = hits.flatMap { w -> w.sources.map { it to w } }.groupBy({ it.first }, { it.second })
-            listHits.addAll(localLists.entries.sortedByDescending { it.value.size }.map { (src, ws) ->
-                ListHit("local:$src", collectionName(src), ws.size, "", ws.firstOrNull { goodCover(it.cover) }?.cover ?: "") })
-            searchMore = false
-            if (listHits.isEmpty()) searchErr = "Aucune histoire avec le tag « ${q.text.trim()} » dans tes listes Wattpad"
-            return
-        }
-        if (false) {
-            searching = true; searchErr = null
+            // Tout Wattpad : plusieurs robots en parallèle cherchent les listes qui contiennent des histoires avec ce tag
+            searching = true; searchErr = null; searchMore = false; listTag = q.text.trim(); searchInfo = "Recherche des histoires #${listTag}…"
             searchJob = scope.launch {
                 try {
-                    val l = Wattpad.searchLists(q.text, (searchPage - 1) * 20)
-                    listHits.addAll(l.filter { h -> listHits.none { it.id == h.id } }); searchMore = l.size >= 10
-                    if (listHits.isEmpty()) searchErr = "Aucune liste trouvée"
-                } catch (e: Exception) { searchErr = "Recherche impossible : ${e.message}" } finally { searching = false }
+                    Wattpad.scanLists(listTag,
+                        onProgress = { msg -> scope.launch { searchInfo = msg } },
+                        onHit = { h -> scope.launch {
+                            if (listHits.none { it.id == h.id }) {
+                                val at = listHits.indexOfFirst { it.count < h.count }.let { if (it < 0) listHits.size else it }
+                                listHits.add(at, h)
+                            }
+                        } })
+                    if (listHits.isEmpty()) searchErr = "Aucune liste trouvée avec des histoires #${listTag}"
+                } catch (e: kotlinx.coroutines.CancellationException) { throw e
+                } catch (e: Exception) { searchErr = "Recherche impossible : ${e.message}" } finally { searching = false; searchInfo = null }
             }
             return
         }
@@ -190,15 +184,15 @@ class Hub(ctx: Context) {
     var openedList by mutableStateOf<ListHit?>(null); private set
     var spiritForm by mutableStateOf<List<FormField>>(emptyList()); private set
     fun loadSpiritForm() { if (spiritForm.isEmpty()) scope.launch { runCatching { Spirit.searchForm() }.onSuccess { spiritForm = it } } }
-    private var localLists: Map<String, List<Work>> = emptyMap()
+    private var listTag = ""
+    var searchInfo by mutableStateOf<String?>(null); private set
     fun openList(h: ListHit?) {
         openedList = h
         if (h == null) { results.clear(); return }
         results.clear(); searchErr = null
-        localLists[h.id.removePrefix("local:")]?.takeIf { h.id.startsWith("local:") }?.let { results.addAll(it); return }
         searching = true
         scope.launch {
-            try { results.addAll(Wattpad.listWorks(h.id)); if (results.isEmpty()) searchErr = "Liste vide ou privée" }
+            try { results.addAll(Wattpad.listWorks(h.id).sortedByDescending { Wattpad.tagged(it.tags, it.title, listTag) }); if (results.isEmpty()) searchErr = "Liste vide ou privée" }
             catch (e: Exception) { searchErr = "Liste illisible : ${e.message}" } finally { searching = false }
         }
     }
