@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import kotlin.math.sin
+import androidx.compose.animation.core.animateFloat
 import kotlinx.coroutines.delay
 
 private val Paper = Color(0xFFF3EBDD)
@@ -160,7 +161,7 @@ private fun ShelfScene(counts: Map<String, Int>, auto: String?, header: Boolean,
             val spec = BOOKS.first { it.site == fs }
             val s = siteUi(fs)
             val floorPx = with(dens) { floorY.toPx() }
-            val t = hover.value
+            val t: Float = hover.value
             Canvas(Modifier.fillMaxSize()) {
                 val d = density
                 val f = fall.value
