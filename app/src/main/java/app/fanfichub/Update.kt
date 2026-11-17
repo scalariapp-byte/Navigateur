@@ -43,23 +43,40 @@ object Updater {
         }.getOrNull()
     }
 
+    /** Téléchargement robuste : délais d'attente, reprise là où ça s'est arrêté (Range), 8 essais. */
     suspend fun download(ctx: Context, progress: (Float) -> Unit): File = withContext(Dispatchers.IO) {
-        val f = File(ctx.cacheDir, "update.apk")
-        val c = URL(REL + "FanficHub.apk").openConnection() as HttpURLConnection
-        c.instanceFollowRedirects = true
-        val total = c.contentLengthLong.coerceAtLeast(1)
+        val f = File(ctx.cacheDir, "update.apk"); f.delete()
         val main = Handler(Looper.getMainLooper())
-        c.inputStream.use { i ->
-            f.outputStream().use { o ->
-                val buf = ByteArray(64 * 1024); var done = 0L; var last = 0L
-                while (true) {
-                    val n = i.read(buf); if (n < 0) break
-                    o.write(buf, 0, n); done += n
-                    if (done - last > 256 * 1024) { last = done; val p = done.toFloat() / total; main.post { progress(p) } }
+        var total = -1L; var tries = 0
+        while (true) {
+            try {
+                val c = URL(REL + "FanficHub.apk?t=" + System.currentTimeMillis()).openConnection() as HttpURLConnection
+                c.instanceFollowRedirects = true; c.useCaches = false; c.connectTimeout = 15000; c.readTimeout = 25000
+                val have = f.length()
+                if (have > 0) c.setRequestProperty("Range", "bytes=$have-")
+                val code = c.responseCode
+                val append = code == 206
+                if (code != 200 && code != 206) error("serveur $code")
+                if (!append) f.delete()
+                if (total < 0) total = if (append) have + c.contentLengthLong else c.contentLengthLong
+                java.io.FileOutputStream(f, append).use { o ->
+                    c.inputStream.use { i ->
+                        val buf = ByteArray(32 * 1024); var last = 0L
+                        while (true) {
+                            val n = i.read(buf); if (n < 0) break
+                            o.write(buf, 0, n)
+                            val done = f.length()
+                            if (done - last > 64 * 1024) { last = done; val p = done.toFloat() / total.coerceAtLeast(1); main.post { progress(p) } }
+                        }
+                    }
                 }
+                if (total <= 0 || f.length() >= total) return@withContext f
+            } catch (e: Exception) {
+                if (++tries >= 8) throw e
+                kotlinx.coroutines.delay(1500L * tries)
             }
         }
-        f
+        @Suppress("UNREACHABLE_CODE") f
     }
 
     fun install(ctx: Context, f: File) {
