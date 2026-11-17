@@ -103,7 +103,7 @@ object Ao3 {
         if (q.fandom.isNotBlank()) p.append("&work_search%5Bfandom_names%5D=").append(e(q.fandom))
         if (q.rating > 0) p.append("&work_search%5Brating_ids%5D=").append(q.rating)
         if (q.minWords > 0) p.append("&work_search%5Bwords_from%5D=").append(q.minWords)
-        return page(p.toString(), "Recherche").first
+        return this.page(p.toString(), "Recherche").first
     }
 
     fun username(): String? = runCatching {
