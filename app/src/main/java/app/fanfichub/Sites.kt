@@ -428,27 +428,40 @@ object Spirit : Site {
     }
 
     override val name = "Spirit Fanfics"
-    override val home = "https://www.spiritfanfics.com/login"
+    override val home = "https://www.spiritfanfiction.com/login"
     override val userHint = "Ton pseudo Spirit"
-    private const val B = "https://www.spiritfanfics.com"
-    override fun owns(url: String) = "spiritfanfics.com" in url
+    private const val B = "https://www.spiritfanfiction.com"
+    override fun owns(url: String) = "spiritfanfics.com" in url || "spiritfanfiction.com" in url
     private fun slug(url: String) = Regex("/historia/([a-z0-9-]+-\\d+)").find(url)?.groupValues?.get(1)
     private fun chapters(d: Document, s: String) =
         d.select("a[href*=/historia/$s/]").filter { Regex("/historia/$s/[^/?#]+").containsMatchIn(it.attr("href")) && it.text().isNotBlank() }
             .map { it.absUrl("href").substringBefore('#') to it.text() }.distinctBy { it.first }
 
-    /** Recherche (page « busca ») : titres et couvertures ; les fiches se complètent à l'ouverture. */
+    /**
+     * Recherche (page « busca ») : chaque résultat donne titre, « escrita por » auteur, statut,
+     * « Capítulos N », « Palavras N », « Categorias … », résumé et image.
+     */
     suspend fun searchStories(q: String, page: Int): List<Work> {
         val d = Web.html("$B/busca?query=${URLEncoder.encode(q.trim(), "UTF-8")}&pagina=$page", "ui")
+        val ic = RegexOption.IGNORE_CASE
         val out = LinkedHashMap<String, Work>()
         d.select("a[href*=/historia/]").forEach { a ->
             val sl = slug(a.attr("href")) ?: return@forEach
-            if (Regex("/historia/$sl/").containsMatchIn(a.attr("href"))) return@forEach
-            val im = (a.selectFirst("img") ?: a.parent()?.selectFirst("img"))?.let { it.absUrl("data-src").ifBlank { it.absUrl("src") } } ?: ""
-            val prev = out["sp:$sl"]
-            val t = a.text().ifBlank { prev?.title ?: pretty(sl) }
-            out["sp:$sl"] = Work("sp:$sl", t, "", listOf(name), "", 0, "?/?", 0, prev?.summary ?: "", emptyList(), "", false, setOf("Recherche"),
-                site = name, url = "$B/historia/$sl", cover = prev?.cover?.ifEmpty { null } ?: im.takeIf { it.startsWith("http") } ?: "")
+            if (Regex("/historia/$sl/").containsMatchIn(a.attr("href")) || a.text().isBlank() || "sp:$sl" in out) return@forEach
+            val box = generateSequence(a.parent()) { it.parent() }.firstOrNull { e ->
+                e.text().contains("escrita por", true) && e.select("a[href*=/historia/]").mapNotNull { slug(it.attr("href")) }.distinct().size <= 1
+            } ?: a.parent() ?: return@forEach
+            val t = box.text()
+            val n = Regex("Cap[ií]tulos\\s+(\\d+)", ic).find(t)?.groupValues?.get(1)?.toIntOrNull() ?: 1
+            val done = Regex("Conclu[ií]d[ao]", ic).containsMatchIn(t)
+            val cat = Regex("Categorias\\s+(.+?)(?:\\s+G[êe]neros|\\s+Personagens|$)", ic).find(t)?.groupValues?.get(1)?.trim()?.take(80) ?: name
+            val summary = box.select("p, div").filter { it.children().isEmpty() || it.tagName() == "p" }.map { it.text() }
+                .filter { it.length > 60 && !it.contains("escrita por", true) && !it.startsWith("Categorias") && !it.startsWith("Gêneros") }.maxByOrNull { it.length } ?: ""
+            val im = box.selectFirst("img")?.let { it.absUrl("data-src").ifBlank { it.absUrl("src") } } ?: ""
+            out["sp:$sl"] = Work("sp:$sl", a.text(), Regex("escrita por\\s+(\\S+)", ic).find(t)?.groupValues?.get(1) ?: "", listOf(cat.substringBefore(",").trim()), "",
+                digits(Regex("Palavras\\s+([\\d.]+)", ic).find(t)?.groupValues?.get(1)), "$n/${if (done) n else "?"}",
+                0, summary, emptyList(), Regex("Atualizada\\s+(.+?)\\s+Idioma", ic).find(t)?.groupValues?.get(1) ?: "", done, setOf("Recherche"),
+                site = name, url = "$B/historia/$sl", cover = im.takeIf { it.startsWith("http") } ?: "", checked = System.currentTimeMillis())
         }
         return out.values.toList()
     }
