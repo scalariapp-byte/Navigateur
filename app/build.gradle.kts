@@ -21,7 +21,7 @@ android {
     }
     packaging {
         jniLibs { useLegacyPackaging = true }
-        resources { excludes += setOf("META-INF/*.version", "META-INF/**/*.kotlin_module", "META-INF/*.kotlin_builtins", "kotlin/**", "DebugProbesKt.bin", "META-INF/LICENSE*", "META-INF/NOTICE*", "**/*.properties") }
+        resources { excludes += setOf("META-INF/*.version", "META-INF/**/*.kotlin_module", "META-INF/*.kotlin_builtins", "kotlin/**", "DebugProbesKt.bin", "META-INF/LICENSE*", "META-INF/NOTICE*") }
     }
     dependenciesInfo { includeInApk = false; includeInBundle = false }
     buildFeatures { compose = true }
