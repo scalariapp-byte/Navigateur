@@ -63,15 +63,17 @@ import androidx.compose.ui.layout.ContentScale
 import java.net.URL
 import java.util.Calendar
 
-val Bg = Color(0xFF0A0A0F)
-val Surf = Color(0xFF15151E)
-val Surf2 = Color(0xFF1F1F2B)
+/** Noir pur (écran OLED : pixels éteints) ou anthracite. */
+var amoled by mutableStateOf(true)
+val Bg: Color get() = if (amoled) Color.Black else Color(0xFF0A0A0F)
+val Surf: Color get() = if (amoled) Color(0xFF0E0E13) else Color(0xFF15151E)
+val Surf2: Color get() = if (amoled) Color(0xFF19191F) else Color(0xFF1F1F2B)
 val Txt = Color(0xFFF4F4F8)
 val Mut = Color(0xFF8D8D9C)
 val A1 = Color(0xFFA78BFA)
 val A2 = Color(0xFFF472B6)
 val Grad = Brush.linearGradient(listOf(A1, A2))
-val THEMES = listOf(Triple("Nuit", 0xFF0A0A0FL, 0xFFE4E4EEL), Triple("Sépia", 0xFFF4ECD8L, 0xFF3B2F22L), Triple("Papier", 0xFFFFFFFFL, 0xFF1A1A1AL))
+val THEMES = listOf(Triple("Noir", 0xFF000000L, 0xFFD4D4DCL), Triple("Nuit", 0xFF0A0A0FL, 0xFFE4E4EEL), Triple("Sépia", 0xFFF4ECD8L, 0xFF3B2F22L), Triple("Papier", 0xFFFFFFFFL, 0xFF1A1A1AL))
 
 fun fandomColor(s: String) = Color.hsv(((s.hashCode() % 360 + 360) % 360).toFloat(), 0.55f, 0.95f)
 fun fmt(n: Int) = when { n >= 1_000_000 -> "%.1fM".format(n / 1e6); n >= 10_000 -> "${n / 1000}k"; n >= 1000 -> "%.1fk".format(n / 1000.0); else -> "$n" }
@@ -416,7 +418,9 @@ fun Library(hub: Hub) {
     var adding by remember { mutableStateOf(false) }
     var link by remember { mutableStateOf("") }
     val filters = listOf("Tout", "En cours", "Nouveautés", "Terminées", "Hors ligne")
-    val list = hub.visible().filter { w ->
+    var col by remember(hub.site) { mutableStateOf<String?>(null) }
+    val cols = hub.visible().flatMap { it.sources }.groupingBy { it }.eachCount().entries.sortedByDescending { it.value }
+    val list = hub.visible().filter { w -> (col == null || col in w.sources) &&
         (q.isBlank() || listOf(w.title, w.author, w.fandoms.joinToString(), w.tags.joinToString()).any { it.contains(q, true) }) && when (f) {
             1 -> w.progress > 0.01f && w.progress < 0.985f
             2 -> w.newChapters > 0
@@ -441,6 +445,13 @@ fun Library(hub: Hub) {
                     color = if (okLink) Color(0xFF4ADE80) else Color(0xFFF87171), fontSize = 13.sp, modifier = Modifier.padding(horizontal = 22.dp, vertical = 6.dp))
                 Text("AO3, Wattpad, FanFiction.net ou Spirit. Astuce : dans Chrome, Partager → Fanfic Hub.", color = Mut, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 22.dp, vertical = 8.dp))
                 Box(Modifier.padding(horizontal = 20.dp)) { GradButton("Ajouter") { if (link.isNotBlank() && (Regex("archiveofourown\\.org/works/\\d+").containsMatchIn(link) || Sites.find(link) != null)) { val l = link; link = ""; adding = false; hub.startImport(l) } } }
+            }
+        }
+        if (cols.size > 1) item {
+            Text("Collections", color = Mut, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 22.dp, bottom = 8.dp))
+            LazyRow(Modifier.padding(bottom = 14.dp), contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                item { FilterPill("Toutes", col == null) { col = null } }
+                items(cols, key = { it.key }) { (k, n) -> FilterPill("${k.removePrefix("Liste : ")} · $n", col == k) { col = if (col == k) null else k } }
             }
         }
         item { SearchBox(q) { q = it } }
@@ -481,7 +492,16 @@ fun Accounts(hub: Hub) {
             GhostButton("Synchronisation complète") { hub.startSync(full = true) }
             Text("La complète relit tout et retire ce que tu as enlevé de tes favoris.", color = Mut, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
 
-            Text("Lecture", color = Txt, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 30.dp, bottom = 12.dp))
+            Text("Apparence", color = Txt, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 30.dp, bottom = 12.dp))
+            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Surf).clickable { hub.setDark(!amoled) }.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Noir pur", color = Txt, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Pixels éteints sur les écrans OLED : plus contrasté, économise la batterie", color = Mut, fontSize = 12.sp)
+                }
+                Box(Modifier.width(48.dp).height(28.dp).clip(CircleShape).background(if (amoled) Grad else SolidColor(Surf2)).padding(3.dp),
+                    contentAlignment = if (amoled) Alignment.CenterEnd else Alignment.CenterStart) { Box(Modifier.size(22.dp).clip(CircleShape).background(Color.White)) }
+            }
+            Text("Lecture", color = Txt, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 24.dp, bottom = 12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 THEMES.forEachIndexed { i, (name, bg, fg) ->
                     Column(Modifier.weight(1f).clip(RoundedCornerShape(18.dp)).background(Color(bg))

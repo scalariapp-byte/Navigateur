@@ -5,6 +5,9 @@ import android.content.Context
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -102,6 +105,8 @@ fun mainText(d: Document): String {
     }?.html() ?: ""
 }
 
+const val BROWSER_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36"
+
 private fun digits(s: String?) = s?.filter { it.isDigit() }?.toIntOrNull() ?: 0
 
 object Wattpad : Site {
@@ -112,7 +117,18 @@ object Wattpad : Site {
     private const val F = "id,title,user(name),description,tags,completed,numParts,voteCount,mature,lastPublishedPart(createDate)"
     override fun owns(url: String) = "wattpad.com" in url
 
-    private suspend fun json(u: String): String = Web.text(u).trim().also {
+    private suspend fun json(u: String): String {
+        val direct = withContext(Dispatchers.IO) {
+            runCatching {
+                Jsoup.connect(u).ignoreContentType(true).ignoreHttpErrors(true).userAgent(BROWSER_UA).header("Accept", "application/json")
+                    .cookies(cookiesFor(B)).timeout(20000).execute().body().trim()
+            }.getOrNull()
+        }
+        if (direct != null && (direct.startsWith("{") || direct.startsWith("["))) return direct
+        return slowJson(u)
+    }
+
+    private suspend fun slowJson(u: String): String = Web.text(u).trim().also {
         if (!it.startsWith("{") && !it.startsWith("[")) error("Wattpad a renvoyé une page inattendue (connecte-toi via « Se connecter sur le site »)")
     }
 
@@ -142,7 +158,9 @@ object Wattpad : Site {
     private suspend fun text(pid: String): String {
         val sb = StringBuilder()
         for (page in 1..30) {
-            val h = Web.html("$B/apiv2/storytext?id=$pid&page=$page").body().html()
+            val h = withContext(Dispatchers.IO) {
+                runCatching { Jsoup.connect("$B/apiv2/storytext?id=$pid&page=$page").ignoreContentType(true).userAgent(BROWSER_UA).cookies(cookiesFor(B)).timeout(20000).execute().body() }.getOrNull()
+            } ?: Web.html("$B/apiv2/storytext?id=$pid&page=$page").body().html()
             if (h.isBlank() || sb.contains(h)) break
             sb.append(h)
         }
@@ -177,8 +195,9 @@ object Wattpad : Site {
             val a = JSONObject(json("$B/api/v3/users/$u/library?limit=200&fields=stories($F)")).optJSONArray("stories") ?: JSONArray()
             for (i in 0 until a.length()) put(work(a.getJSONObject(i)).copy(sources = setOf("Bibliothèque")))
         }
-        runCatching { lists(u) }.getOrDefault(emptyList()).forEach { (id, name) ->
-            runCatching { listStories(id) }.getOrDefault(emptyList()).forEach { put(work(it).copy(sources = setOf("Liste : $name"))) }
+        coroutineScope {
+            runCatching { lists(u) }.getOrDefault(emptyList()).map { (id, name) -> async { name to runCatching { listStories(id) }.getOrDefault(emptyList()) } }
+                .awaitAll().forEach { (name, st) -> st.forEach { put(work(it).copy(sources = setOf("Liste : $name"))) } }
         }
         if (out.isEmpty()) error("aucune histoire trouvée pour « $user » (bibliothèque et listes vides ou privées)")
         return out.values.toList()
@@ -323,7 +342,19 @@ object Spirit : Site {
     }
 
     override suspend fun library(user: String, known: Map<String, Work>): List<Work> {
-        val slugs = Web.html("$B/biblioteca").select("a[href*=/historia/]").mapNotNull { slug(it.attr("href")) }.distinct().take(80)
-        return slugs.mapNotNull { s -> known["sp:$s"]?.takeIf { it.complete } ?: runCatching { info("$B/historia/$s") }.getOrNull() }
+        val u = URLEncoder.encode(user.trim(), "UTF-8")
+        val found = LinkedHashMap<String, Pair<String, String>>() // slug -> (titre, collection)
+        for ((path, src) in listOf("/perfil/$u/favoritos" to "Favori", "/perfil/$u/biblioteca" to "Bibliothèque", "/biblioteca" to "Bibliothèque")) {
+            val d = runCatching { Web.html(B + path) }.getOrNull() ?: continue
+            d.select("a[href*=/historia/]").forEach { a ->
+                val sl = slug(a.attr("href")) ?: return@forEach
+                if (a.text().isNotBlank() && !Regex("/historia/$sl/").containsMatchIn(a.attr("href"))) found.putIfAbsent(sl, a.text() to src)
+            }
+        }
+        if (found.isEmpty()) error("aucune histoire trouvée (favoris et bibliothèque vides ou privés ; connecte-toi à l'étape 1)")
+        return found.map { (sl, p) ->
+            known["sp:$sl"]?.copy(sources = setOf(p.second))
+                ?: Work("sp:$sl", p.first, "", listOf(name), "", 0, "?/?", 0, "", emptyList(), "", false, setOf(p.second), site = name, url = "$B/historia/$sl")
+        }
     }
 }

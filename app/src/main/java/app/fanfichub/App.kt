@@ -49,6 +49,8 @@ class Hub(ctx: Context) {
     var newVersion by mutableStateOf<Long?>(null); private set
     var updating by mutableStateOf<Float?>(null); private set
     val version = Updater.current(ctx)
+    init { amoled = prefs.getBoolean("amoled", true) }
+    fun setDark(v: Boolean) { amoled = v; prefs.edit().putBoolean("amoled", v).apply() }
     /** Les tâches longues vivent ici : changer d'écran ne les interrompt plus. */
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     var site by mutableStateOf(prefs.getString("site", null)); private set
@@ -132,7 +134,8 @@ class Hub(ctx: Context) {
             old.values.filter { !(full && it.site == "AO3" && u != null) }.forEach { merged[it.id] = it }
             seen.values.forEach { f ->
                 val o = old[f.id]
-                merged[f.id] = if (o == null) f else f.copy(newChapters = o.newChapters + maxOf(0, f.published - o.published),
+                val gained = if (o == null || o.chapters.startsWith("?") || f.chapters.startsWith("?")) 0 else maxOf(0, f.published - o.published)
+                merged[f.id] = if (o == null) f else if (f.chapters.startsWith("?") && !o.chapters.startsWith("?")) o.copy(sources = o.sources + f.sources) else f.copy(newChapters = o.newChapters + gained,
                     progress = o.progress, lastRead = o.lastRead, sources = if (full) f.sources else o.sources + f.sources)
             }
             works.clear(); works.addAll(merged.values); store.save(works)
@@ -193,9 +196,13 @@ class Hub(ctx: Context) {
                     val l = s.library(su, old); l.forEach { add(it) }; publish()
                     siteStatus[s.name] = "${l.size} fanfictions synchronisées"
                 }.onFailure { siteStatus[s.name] = "Erreur : ${it.message}" }
-                old.values.filter { it.site == s.name && it.id !in seen && (full || !it.complete) }.forEach { w ->
-                    status = "${s.name} : ${w.title.take(30)}"
-                    runCatching { s.info(w.link) }.getOrNull()?.let { add(it.copy(sources = w.sources)) }
+                // Détails : fiches encore incomplètes (« ?/? ») et fanfictions suivies non terminées.
+                val targets = (seen.values.filter { it.site == s.name && it.chapters.startsWith("?") } +
+                    old.values.filter { it.site == s.name && it.id !in seen && (full || !it.complete) }).distinctBy { it.id }
+                targets.forEachIndexed { i, w ->
+                    status = "${s.name} · détails ${i + 1}/${targets.size}"; syncProgress = (i + 1f) / targets.size
+                    runCatching { s.info(w.link) }.getOrNull()?.let { add(it.copy(sources = seen[w.id]?.sources ?: w.sources)) }
+                    if (i % 4 == 3) publish()
                 }
                 publish()
             }
