@@ -91,6 +91,21 @@ object Ao3 {
     private fun num(s: String?) = s?.filter { it.isDigit() }?.toIntOrNull() ?: 0
     private fun complete(ch: String) = ch.split('/').let { it.size == 2 && it[0].trim() == it[1].trim() }
 
+    /** Recherche AO3 avec filtres (paramètres officiels du moteur de recherche). */
+    fun search(q: SearchQuery, page: Int): List<Work> {
+        fun e(v: String) = java.net.URLEncoder.encode(v, "UTF-8")
+        val p = StringBuilder("/works/search?commit=Search&page=$page")
+        p.append("&work_search%5Bquery%5D=").append(e(q.text))
+        p.append("&work_search%5Bsort_column%5D=").append(when (q.sort) { 1 -> "kudos_count"; 2 -> "revised_at"; 3 -> "word_count"; else -> "_score" })
+        p.append("&work_search%5Bsort_direction%5D=desc")
+        when (q.status) { 1 -> p.append("&work_search%5Bcomplete%5D=T"); 2 -> p.append("&work_search%5Bcomplete%5D=F") }
+        if (q.lang.isNotEmpty()) p.append("&work_search%5Blanguage_id%5D=").append(q.lang)
+        if (q.fandom.isNotBlank()) p.append("&work_search%5Bfandom_names%5D=").append(e(q.fandom))
+        if (q.rating > 0) p.append("&work_search%5Brating_ids%5D=").append(q.rating)
+        if (q.minWords > 0) p.append("&work_search%5Bwords_from%5D=").append(q.minWords)
+        return page(p.toString(), "Recherche").first
+    }
+
     fun username(): String? = runCatching {
         get("/").selectFirst("#greeting a[href^=/users/], ul.user.navigation a[href^=/users/], a.dropdown-toggle[href^=/users/]")
             ?.attr("href")?.removePrefix("/users/")?.substringBefore('/')?.ifBlank { null }
@@ -161,3 +176,10 @@ object Ao3 {
         return titles to html
     }
 }
+
+
+/** Critères de recherche. sort : 0 pertinence, 1 populaires, 2 récentes, 3 longues ; status : 0 toutes, 1 terminées, 2 en cours. */
+data class SearchQuery(
+    val text: String = "", val site: String = "AO3", val sort: Int = 0, val status: Int = 0,
+    val lang: String = "", val rating: Int = 0, val minWords: Int = 0, val fandom: String = "",
+)

@@ -113,7 +113,49 @@ class Hub(ctx: Context) {
 
     fun push(s: Screen) { stack += s }
     fun pop() { if (stack.size > 1) stack.removeAt(stack.lastIndex) }
-    fun work(id: String) = works.firstOrNull { it.id == id }
+    fun work(id: String) = works.firstOrNull { it.id == id } ?: results.firstOrNull { it.id == id }
+    fun inLibrary(id: String) = works.any { it.id == id }
+
+    // ---------- Recherche ----------
+    var query by mutableStateOf(SearchQuery())
+    val results = mutableStateListOf<Work>()
+    var searching by mutableStateOf(false); private set
+    var searchErr by mutableStateOf<String?>(null); private set
+    var searchMore by mutableStateOf(false); private set
+    private var searchPage = 1
+    private var searchJob: kotlinx.coroutines.Job? = null
+
+    fun runSearch(more: Boolean = false) {
+        val q = query
+        if (q.text.isBlank() && q.fandom.isBlank()) return
+        searchJob?.cancel()
+        if (!more) { results.clear(); searchPage = 1 } else searchPage++
+        searching = true; searchErr = null
+        searchJob = scope.launch {
+            try {
+                val raw = when (q.site) {
+                    "Wattpad" -> Wattpad.searchStories(q.text, (searchPage - 1) * 20)
+                    "FanFiction.net" -> Ffn.searchStories(q.text, searchPage)
+                    "Spirit Fanfics" -> Spirit.searchStories(q.text, searchPage)
+                    else -> withContext(Dispatchers.IO) { Ao3.search(q, searchPage) }
+                }
+                // Filtres appliqués par l'app quand le site ne les propose pas
+                var list = raw.filter { w ->
+                    (q.status == 0 || (q.status == 1) == w.complete || w.chapters.startsWith("?")) &&
+                    (q.minWords == 0 || w.words == 0 || w.words >= q.minWords)
+                }
+                if (q.site != "AO3") list = when (q.sort) { 1 -> list.sortedByDescending { it.kudos }; 3 -> list.sortedByDescending { it.words }; else -> list }
+                val known = results.map { it.id }.toSet()
+                results.addAll(list.filter { it.id !in known })
+                searchMore = raw.size >= 10
+                if (results.isEmpty()) searchErr = "Aucun résultat"
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e
+            } catch (e: Exception) { searchErr = "Recherche impossible : ${e.message ?: "réseau"}" }
+            finally { searching = false }
+        }
+    }
+
+    fun addToLibrary(w: Work) { update(w.copy(sources = setOf("Ajouté"))) }
     /** Recharge depuis le disque (la synchro d'arrière-plan a pu écrire entre-temps). */
     fun reload() { if (!syncing && loadJob.isCompleted) { val l = store.load(); if (l.isNotEmpty()) { works.clear(); works.addAll(l) } } }
     fun update(w: Work) { val i = works.indexOfFirst { it.id == w.id }; if (i >= 0) works[i] = w else works += w; persist() }

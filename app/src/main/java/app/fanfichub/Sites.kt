@@ -226,6 +226,17 @@ object Wattpad : Site {
 
     override val searchable = true
 
+    /** Recherche d'histoires (API de recherche, puis API v3 en secours). */
+    suspend fun searchStories(q: String, offset: Int): List<Work> {
+        val e = URLEncoder.encode(q.trim(), "UTF-8")
+        for (u in listOf("$B/v4/search/stories/?query=$e&limit=20&offset=$offset&mature=true&fields=stories($F)",
+                "$B/api/v3/stories?query=$e&limit=20&offset=$offset&fields=stories($F)")) {
+            val a = runCatching { JSONObject(json(u, "ui")).optJSONArray("stories") }.getOrNull() ?: continue
+            if (a.length() > 0) return (0 until a.length()).map { work(a.getJSONObject(it)).copy(sources = setOf("Recherche")) }
+        }
+        return emptyList()
+    }
+
     private fun acc(o: JSONObject) = Account(o.optString("username"), o.optString("name"), "@" + o.optString("username"), o.optString("avatar"),
         listOfNotNull(o.optInt("numLists", -1).takeIf { it >= 0 }?.let { "$it listes" }, o.optInt("numFollowers", -1).takeIf { it >= 0 }?.let { "$it abonnés" },
             o.optInt("numStoriesPublished", -1).takeIf { it > 0 }?.let { "$it histoires" }).joinToString(" · "))
@@ -352,6 +363,22 @@ object Ffn : Site {
         })
     }
 
+    /** Recherche d'histoires sur le site mobile. */
+    suspend fun searchStories(q: String, page: Int): List<Work> {
+        val d = Web.html("$M/search/?ready=1&type=story&keywords=${URLEncoder.encode(q.trim(), "UTF-8")}&ppage=$page", "ui")
+        val out = LinkedHashMap<String, Work>()
+        d.select("a[href^=/s/]").forEach { a ->
+            val id = Regex("^/s/(\\d+)").find(a.attr("href"))?.groupValues?.get(1) ?: return@forEach
+            if (id in out || a.text().isBlank()) return@forEach
+            val box = generateSequence(a.parent()) { it.parent() }.firstOrNull { it.text().length > a.text().length + 20 || it.tagName() == "div" } ?: return@forEach
+            val meta = box.selectFirst(".gray, .xgray, .z-padtop2")?.text() ?: box.text()
+            val fandom = meta.substringBefore(",").takeIf { it.length in 2..60 && !it.contains(":") } ?: ""
+            out[id] = work(id, a.text(), box.selectFirst("a[href^=/u/]")?.text() ?: "", fandom, meta,
+                box.selectFirst(".z-indent, .z-padtop")?.ownText() ?: "", img(box.selectFirst("img"))).copy(sources = setOf("Recherche"))
+        }
+        return out.values.toList()
+    }
+
     /** Favoris : page mobile « ?a=fs » (le navigateur intégré y est redirigé), paginée ; repli sur la version ordinateur. */
     override suspend fun library(user: String, known: Map<String, Work>): List<Work> {
         val uid = Regex("(\\d{3,})").find(user)?.value ?: return emptyList()
@@ -409,6 +436,22 @@ object Spirit : Site {
     private fun chapters(d: Document, s: String) =
         d.select("a[href*=/historia/$s/]").filter { Regex("/historia/$s/[^/?#]+").containsMatchIn(it.attr("href")) && it.text().isNotBlank() }
             .map { it.absUrl("href").substringBefore('#') to it.text() }.distinctBy { it.first }
+
+    /** Recherche (page « busca ») : titres et couvertures ; les fiches se complètent à l'ouverture. */
+    suspend fun searchStories(q: String, page: Int): List<Work> {
+        val d = Web.html("$B/busca?query=${URLEncoder.encode(q.trim(), "UTF-8")}&pagina=$page", "ui")
+        val out = LinkedHashMap<String, Work>()
+        d.select("a[href*=/historia/]").forEach { a ->
+            val sl = slug(a.attr("href")) ?: return@forEach
+            if (Regex("/historia/$sl/").containsMatchIn(a.attr("href"))) return@forEach
+            val im = (a.selectFirst("img") ?: a.parent()?.selectFirst("img"))?.let { it.absUrl("data-src").ifBlank { it.absUrl("src") } } ?: ""
+            val prev = out["sp:$sl"]
+            val t = a.text().ifBlank { prev?.title ?: pretty(sl) }
+            out["sp:$sl"] = Work("sp:$sl", t, "", listOf(name), "", 0, "?/?", 0, prev?.summary ?: "", emptyList(), "", false, setOf("Recherche"),
+                site = name, url = "$B/historia/$sl", cover = prev?.cover?.ifEmpty { null } ?: im.takeIf { it.startsWith("http") } ?: "")
+        }
+        return out.values.toList()
+    }
 
     private fun pretty(sl: String) = sl.substringBeforeLast('-').replace('-', ' ').replaceFirstChar { it.uppercase() }
 

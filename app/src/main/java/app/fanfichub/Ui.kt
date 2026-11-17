@@ -307,7 +307,7 @@ fun Home(hub: Hub) {
     LaunchedEffect(hub.pendingImport) { hub.pendingImport?.let { hub.pendingImport = null; hub.startImport(it) } }
     Box(Modifier.fillMaxSize()) {
         PullToRefreshBox(isRefreshing = false, onRefresh = { hub.startSync(only = hub.site?.takeIf { it != "ALL" }) }, modifier = Modifier.fillMaxSize()) {
-            when (hub.tab) { 0 -> Feed(hub); 1 -> Library(hub); else -> Accounts(hub) }
+            when (hub.tab) { 0 -> Feed(hub); 1 -> Library(hub); 2 -> SearchTab(hub); else -> Accounts(hub) }
         }
         Box(Modifier.fillMaxWidth().windowInsetsTopHeight(WindowInsets.statusBars).background(Bg))
         BottomBar(hub, Modifier.align(Alignment.BottomCenter))
@@ -316,7 +316,7 @@ fun Home(hub: Hub) {
 
 @Composable
 fun BottomBar(hub: Hub, modifier: Modifier) {
-    val items = listOf(Icons.Default.Home to "Accueil", Icons.Default.Star to "Bibliothèque", Icons.Default.Person to "Comptes")
+    val items = listOf(Icons.Default.Home to "Accueil", Icons.Default.Star to "Bibliothèque", Icons.Default.Search to "Recherche", Icons.Default.Person to "Réglages")
     val shape = RoundedCornerShape(30.dp)
     Row(modifier.navigationBarsPadding().padding(bottom = 14.dp).clip(shape).background(Surf2.copy(alpha = 0.96f))
         .border(1.dp, Color.White.copy(alpha = 0.08f), shape).padding(6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -379,7 +379,7 @@ fun Feed(hub: Hub) {
         item { ShelfStrip(hub) }
         if (hub.newVersion != null) item { UpdateCard(hub) }
         if (hub.user == null && hub.users.isEmpty()) item {
-            Row(Modifier.padding(20.dp).fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Surf).clickable { hub.tab = 2 }.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.padding(20.dp).fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Surf).clickable { hub.tab = 3 }.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Configure tes comptes pour remplir tes étagères", color = Txt, fontSize = 15.sp, modifier = Modifier.weight(1f))
                 Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Mut)
             }
@@ -797,6 +797,7 @@ fun Detail(hub: Hub, id: String) {
                         }
                     }
                     err?.let { Text(it, color = Color(0xFFF87171), fontSize = 14.sp, modifier = Modifier.padding(top = 10.dp)) }
+                    if (!hub.inLibrary(id)) { Spacer(Modifier.height(10.dp)); GhostButton("+ Ajouter à ma bibliothèque") { hub.addToLibrary(w) } }
                     Spacer(Modifier.height(10.dp))
                     GhostButton("Lire sur ${w.site} (dans l'app)") { hub.push(Screen.Web(w.link, w.title)) }
                     if (w.summary.isNotBlank()) {
