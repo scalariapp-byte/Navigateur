@@ -300,7 +300,6 @@ fun Home(hub: Hub) {
             when (hub.tab) { 0 -> Feed(hub); 1 -> Library(hub); else -> Accounts(hub) }
         }
         Box(Modifier.fillMaxWidth().windowInsetsTopHeight(WindowInsets.statusBars).background(Bg))
-        SyncPill(hub, Modifier.align(Alignment.TopCenter))
         BottomBar(hub, Modifier.align(Alignment.BottomCenter))
     }
 }

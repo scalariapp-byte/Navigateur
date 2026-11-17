@@ -238,8 +238,11 @@ class Hub(ctx: Context) {
         } catch (e: Exception) {
             publish()
             status = "Synchro interrompue : ${e.message ?: "réseau indisponible"}"
-        } finally { syncing = false; syncProgress = null }
+        } finally { syncing = false; syncProgress = null; prefetchCovers() }
     }
+
+    /** Couvertures préchargées en arrière-plan : les étagères s'affichent sans attendre. */
+    fun prefetchCovers() { scope.launch { Img.prefetch(works.sortedByDescending { it.lastRead }.map { it.cover }) } }
 
     fun syncDue(minutes: Int = 20) = (user != null || users.isNotEmpty()) && System.currentTimeMillis() - prefs.getLong("lastSync", 0) > minutes * 60_000L
 }
@@ -253,6 +256,7 @@ class MainActivity : ComponentActivity() {
         hub = Hub(this)
         handle(intent)
         setContent { HubApp(hub) }
+        hub.prefetchCovers()
         BackgroundSync.schedule(this)
         if (android.os.Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED)
             requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)

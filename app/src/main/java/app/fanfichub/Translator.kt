@@ -70,6 +70,23 @@ object Translator {
         } finally { tr.close() }
     }
 
+    /** Traduit une liste de textes courts (pages web) par lots ; garde l'ordre. */
+    suspend fun texts(items: List<String>, progress: (Float) -> Unit = {}): List<String> {
+        val src = items.map { it.replace(Regex("\\s+"), " ").trim() }
+        val out = src.toMutableList()
+        var i = 0
+        while (i < src.size) {
+            var j = i; var len = 0
+            while (j < src.size && (j == i || len + src[j].length < 4500)) { len += src[j].length + 2; j++ }
+            val group = src.subList(i, j)
+            val res = google(group.joinToString("\n\n")).split(Regex("\n\\s*\n"))
+            if (res.size == group.size) for (k in group.indices) out[i + k] = res[k].trim()
+            else for (k in group.indices) out[i + k] = google(group[k]).trim()
+            i = j; progress(i.toFloat() / src.size); delay(120)
+        }
+        return out
+    }
+
     suspend fun toFrench(html: String, progress: (Float) -> Unit): String {
         val doc = Jsoup.parseBodyFragment(html)
         var blocks = doc.select("p, h2, h3, h4, li, blockquote").filter { it.text().isNotBlank() && it.select("p, li").none { c -> c !== it } }

@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
 import java.io.File
 import java.net.URL
 
@@ -35,12 +36,25 @@ object Img {
     lateinit var dir: File
     private val mem = LruCache<String, ImageBitmap>(120)
     fun cached(url: String): ImageBitmap? = mem.get(url)
+    private fun file(url: String) = File(dir, Integer.toHexString(url.hashCode()))
+
+    /** Préchargement : télécharge les couvertures manquantes sur le disque (6 à la fois), puis met les premières en mémoire. */
+    suspend fun prefetch(urls: List<String>, warm: Int = 40) = withContext(Dispatchers.IO) {
+        val list = urls.filter { it.isNotBlank() }.distinct()
+        val sem = kotlinx.coroutines.sync.Semaphore(6)
+        kotlinx.coroutines.coroutineScope {
+            list.filter { !file(it).exists() }.forEach { u ->
+                launch { sem.acquire(); try { runCatching { file(u).writeBytes(URL(u).readBytes()) } } finally { sem.release() } }
+            }
+        }
+        list.take(warm).forEach { load(it) }
+    }
     suspend fun load(url: String): ImageBitmap? {
         if (url.isBlank()) return null
         mem.get(url)?.let { return it }
         return withContext(Dispatchers.IO) {
             runCatching {
-                val f = File(dir, Integer.toHexString(url.hashCode()))
+                val f = file(url)
                 val bytes = if (f.exists()) f.readBytes() else URL(url).readBytes().also { f.writeBytes(it) }
                 val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 BitmapFactory.decodeByteArray(bytes, 0, bytes.size, o)

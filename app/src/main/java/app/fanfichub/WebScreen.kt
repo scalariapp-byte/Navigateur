@@ -3,12 +3,20 @@ package app.fanfichub
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.net.Uri
+import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -41,6 +49,14 @@ function clean(){
 clean();if(!window.__fhObs){window.__fhObs=new MutationObserver(function(){clearTimeout(window.__fhT);window.__fhT=setTimeout(clean,300)});
 window.__fhObs.observe(document.documentElement,{childList:true,subtree:true})}})()"""
 
+/** Envoie les textes visibles de la page au traducteur, puis les remplace (mise en page conservée). */
+private const val TR_JS = """(function(){
+var w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT,{acceptNode:function(n){
+ var p=n.parentNode&&n.parentNode.nodeName;return n.nodeValue.trim().length>1&&!n.__fh&&p!=='SCRIPT'&&p!=='STYLE'&&p!=='NOSCRIPT'?1:3}});
+var a=[],n;while((n=w.nextNode())&&a.length<3000)a.push(n);window.__fhNodes=a;
+window.fhApply=function(t){t.forEach(function(s,i){var x=window.__fhNodes[i];if(x&&s){x.nodeValue=s;x.__fh=1}})};
+FH.batch(JSON.stringify(a.map(function(x){return x.nodeValue})));})()"""
+
 /** Lecture sur le site, dans l'app, avec un navigateur qui se présente comme Chrome (session conservée). */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -49,13 +65,22 @@ fun WebScreen(hub: Hub, url: String, title: String) {
     var web by remember { mutableStateOf<WebView?>(null) }
     var progress by remember { mutableIntStateOf(0) }
     var canBack by remember { mutableStateOf(false) }
+    var tr by remember { mutableStateOf<String?>(null) } // null = VO, "…" = en cours, "FR" = traduit
     BackHandler { if (canBack) web?.goBack() else hub.pop() }
     Column(Modifier.fillMaxSize().background(Bg)) {
         Row(Modifier.statusBarsPadding().padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             CircleIcon(Icons.AutoMirrored.Filled.ArrowBack) { if (canBack) web?.goBack() else hub.pop() }
             Text(title, color = Txt, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f).padding(horizontal = 12.dp))
-            CircleIcon(Icons.Default.Refresh) { web?.reload() }
+            Text(when (tr) { null -> "FR"; "FR" -> "VO"; else -> tr!! }, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.clip(CircleShape).background(Grad).clickable {
+                    when (tr) {
+                        null -> { tr = "0 %"; web?.evaluateJavascript(TR_JS, null) }
+                        "FR" -> { tr = null; web?.reload() }
+                    }
+                }.padding(horizontal = 14.dp, vertical = 10.dp))
+            Spacer(Modifier.width(8.dp))
+            CircleIcon(Icons.Default.Refresh) { tr = null; web?.reload() }
             Spacer(Modifier.width(8.dp))
             CircleIcon(Icons.Default.Share) { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(web?.url ?: url))) }
         }
@@ -73,6 +98,19 @@ fun WebScreen(hub: Hub, url: String, title: String) {
                     override fun onPageFinished(v: WebView, u: String?) { v.evaluateJavascript(CLEAN_JS, null) }
                 }
                 webChromeClient = object : WebChromeClient() { override fun onProgressChanged(v: WebView, p: Int) { progress = p } }
+                val view = this
+                addJavascriptInterface(object {
+                    @JavascriptInterface fun batch(json: String) {
+                        hub.scope.launch {
+                            try {
+                                val a = JSONArray(json); val items = (0 until a.length()).map { a.getString(it) }
+                                val res = Translator.texts(items) { p -> tr = "${(p * 100).toInt()} %" }
+                                view.evaluateJavascript("fhApply(" + JSONArray(res).toString() + ")", null)
+                                tr = "FR"
+                            } catch (e: Exception) { tr = null; view.evaluateJavascript("alert(" + JSONObject.quote("Traduction impossible : " + e.message) + ")", null) }
+                        }
+                    }
+                }, "FH")
                 loadUrl(url)
                 web = this
             }
