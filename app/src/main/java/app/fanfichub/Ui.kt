@@ -260,19 +260,18 @@ fun SitePicker(hub: Hub) {
 /** Sélecteur de site toujours visible en haut. */
 @Composable
 fun SiteChips(hub: Hub) {
-    LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 12.dp, bottom = 4.dp)) {
-        item {
-            val on = hub.site == "ALL"
-            Text("Tous", color = if (on) Color.White else Mut, fontWeight = FontWeight.SemiBold, fontSize = 14.sp,
-                modifier = Modifier.clip(CircleShape).background(if (on) Grad else SolidColor(Surf2)).clickable { hub.pickSite("ALL") }.padding(horizontal = 16.dp, vertical = 10.dp))
-        }
-        items(SITE_UI, key = { it.name }) { s ->
+    val counts = remember(hub.works.size, hub.syncing) { hub.works.groupingBy { it.site }.eachCount() }
+    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        val allOn = hub.site == "ALL"
+        Box(Modifier.weight(1f).height(44.dp).clip(CircleShape).background(if (allOn) Grad else SolidColor(Surf2)).clickable { hub.pickSite("ALL") },
+            contentAlignment = Alignment.Center) { Text("Tous", color = if (allOn) Color.White else Mut, fontWeight = FontWeight.SemiBold, fontSize = 13.sp) }
+        SITE_UI.forEach { s ->
             val on = hub.site == s.name
-            Row(Modifier.clip(CircleShape).background(if (on) s.color else Surf2).clickable { hub.pickSite(s.name) }.padding(start = 5.dp, end = 12.dp, top = 5.dp, bottom = 5.dp),
-                verticalAlignment = Alignment.CenterVertically) {
-                SiteLogo(s.name, 28)
-                Text("${hub.works.count { it.site == s.name }}", color = if (on) Color.White else Mut, fontWeight = FontWeight.SemiBold, fontSize = 13.sp,
-                    modifier = Modifier.padding(start = 7.dp))
+            Row(Modifier.weight(1f).height(44.dp).clip(CircleShape).background(if (on) s.color else Surf2).clickable { hub.pickSite(s.name) },
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+                SiteLogo(s.name, 24)
+                Text(fmt(counts[s.name] ?: 0), color = if (on) Color.White else Mut, fontWeight = FontWeight.SemiBold, fontSize = 11.sp, maxLines = 1,
+                    modifier = Modifier.padding(start = 4.dp))
             }
         }
     }
@@ -300,6 +299,7 @@ fun Home(hub: Hub) {
         PullToRefreshBox(isRefreshing = false, onRefresh = { hub.startSync(only = hub.site?.takeIf { it != "ALL" }) }, modifier = Modifier.fillMaxSize()) {
             when (hub.tab) { 0 -> Feed(hub); 1 -> Library(hub); else -> Accounts(hub) }
         }
+        Box(Modifier.fillMaxWidth().windowInsetsTopHeight(WindowInsets.statusBars).background(Bg))
         SyncPill(hub, Modifier.align(Alignment.TopCenter))
         BottomBar(hub, Modifier.align(Alignment.BottomCenter))
     }
@@ -419,11 +419,12 @@ fun Library(hub: Hub) {
     val visible = remember(hub.works.size, hub.syncing, site, hub.stack.size) { hub.visible() }
     val shelves = remember(visible) {
         if (site == "ALL") visible.groupBy { it.site }.map { (k, v) -> k to v }.sortedByDescending { it.second.size }
+        else if (site == "AO3") visible.groupBy { fandomKey(it) }.map { (k, v) -> k to v }.sortedByDescending { it.second.size }
         else visible.flatMap { w -> w.sources.map { it to w } }.groupBy({ it.first }, { it.second }).map { (k, v) -> k to v }.sortedByDescending { it.second.size }
     }
     val list = remember(visible, q, f, col, hub.downloaded) {
         visible.filter { w ->
-            col.let { c -> c == null || c in w.sources || c == w.site } &&
+            col.let { c -> c == null || c in w.sources || c == w.site || (w.site == "AO3" && c == fandomKey(w)) } &&
             (q.isBlank() || listOf(w.title, w.author, w.fandoms.joinToString(), w.tags.joinToString()).any { it.contains(q, true) }) && when (f) {
                 1 -> w.progress > 0.01f && w.progress < 0.985f
                 2 -> w.newChapters > 0
@@ -434,6 +435,7 @@ fun Library(hub: Hub) {
         }.sortedWith(compareByDescending<Work> { it.newChapters > 0 }.thenByDescending { it.lastRead }.thenBy { it.title.lowercase() })
     }
     val listMode = searching || col != null || f != 0
+    val gridMode = col != null && !searching && f == 0
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 120.dp)) {
         item {
             Row(Modifier.statusBarsPadding().padding(start = 22.dp, end = 14.dp, top = 22.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -462,7 +464,7 @@ fun Library(hub: Hub) {
             Text("‹ Toutes les étagères", color = A1, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.padding(start = 12.dp, top = 8.dp).clip(CircleShape).clickable { col = null }.padding(10.dp))
         }
-        if (listMode || searching) item {
+        if ((listMode || searching) && !gridMode) item {
             LazyRow(Modifier.padding(vertical = 12.dp), contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 itemsIndexed(filters) { i, s -> FilterPill(s, i == f) { f = i } }
             }
@@ -473,6 +475,9 @@ fun Library(hub: Hub) {
             items(shelves, key = { it.first }) { (k, v) ->
                 BookShelf(if (site == "ALL") k else collectionName(k), v, onAll = { col = k }) { w -> hub.push(Screen.Detail(w.id)) }
             }
+        } else if (gridMode) {
+            item { Spacer(Modifier.height(8.dp)) }
+            items(list.chunked(12), key = { it.first().id }) { part -> BookRows(part) { w -> hub.push(Screen.Detail(w.id)) } }
         } else {
             if (list.isEmpty()) item { Empty("Aucune fanfiction ici.") }
             items(list, key = { it.id }) { w ->

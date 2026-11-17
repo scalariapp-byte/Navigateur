@@ -122,14 +122,21 @@ object Wattpad : Site {
     private const val F = "id,title,user(name),description,tags,completed,numParts,voteCount,mature,cover,lastPublishedPart(createDate)"
     override fun owns(url: String) = "wattpad.com" in url
 
+    /** Mis à vrai pour forcer le passage par le navigateur intégré (si les requêtes directes ne donnent rien). */
+    private var slow = false
+
     private suspend fun json(u: String): String {
-        val direct = withContext(Dispatchers.IO) {
-            runCatching {
-                Jsoup.connect(u).ignoreContentType(true).ignoreHttpErrors(true).userAgent(BROWSER_UA).header("Accept", "application/json")
-                    .cookies(cookiesFor(B)).timeout(20000).execute().body().trim()
-            }.getOrNull()
+        if (!slow) {
+            val direct = withContext(Dispatchers.IO) {
+                runCatching {
+                    val r = Jsoup.connect(u).ignoreContentType(true).ignoreHttpErrors(true).userAgent(BROWSER_UA).header("Accept", "application/json")
+                        .cookies(cookiesFor(B)).timeout(20000).execute()
+                    r.body().trim().takeIf { r.statusCode() == 200 }
+                }.getOrNull()
+            }
+            val isError = direct != null && Regex("^\\{\\s*\"(error|error_type|code|message)\"").containsMatchIn(direct)
+            if (direct != null && !isError && (direct.startsWith("{") || direct.startsWith("["))) return direct
         }
-        if (direct != null && (direct.startsWith("{") || direct.startsWith("["))) return direct
         return slowJson(u)
     }
 
@@ -192,6 +199,14 @@ object Wattpad : Site {
     }
 
     override suspend fun library(user: String, known: Map<String, Work>): List<Work> {
+        slow = false
+        val r = runCatching { fetchLibrary(user) }.getOrDefault(emptyList())
+        if (r.isNotEmpty()) return r
+        slow = true // nouvel essai via le navigateur intégré
+        try { return fetchLibrary(user).ifEmpty { error("aucune histoire trouvée pour « $user » (listes vides ou privées)") } } finally { slow = false }
+    }
+
+    private suspend fun fetchLibrary(user: String): List<Work> {
         val u = enc(user)
         val out = LinkedHashMap<String, Work>()
         fun put(w: Work) { out[w.id] = out[w.id]?.let { it.copy(sources = it.sources + w.sources) } ?: w }
@@ -204,7 +219,6 @@ object Wattpad : Site {
             runCatching { lists(u) }.getOrDefault(emptyList()).map { (id, name) -> async { name to runCatching { listStories(id) }.getOrDefault(emptyList()) } }
                 .awaitAll().forEach { (name, st) -> st.forEach { put(work(it).copy(sources = setOf("Liste : $name"))) } }
         }
-        if (out.isEmpty()) error("aucune histoire trouvée pour « $user » (bibliothèque et listes vides ou privées)")
         return out.values.toList()
     }
 

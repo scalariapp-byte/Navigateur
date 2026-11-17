@@ -216,10 +216,11 @@ class Hub(ctx: Context) {
             for (s in Sites.all.filter { only == null || it.name == only }) {
                 val su = users[s.name]
                 if (su != null) runCatching {
+                    siteStatus.remove(s.name)
                     status = "${s.name} · bibliothèque…"; syncProgress = null
                     val l = s.library(su, old); l.forEach { add(it) }; publish()
                     siteStatus[s.name] = "${l.size} fanfictions synchronisées"
-                }.onFailure { siteStatus[s.name] = "Erreur : ${it.message}" }
+                }.onFailure { e -> siteStatus[s.name] = if (old.values.any { it.site == s.name }) "Synchro partielle : ${e.message}" else "Erreur : ${e.message}" }
                 // Détails : fiches encore incomplètes (« ?/? ») et fanfictions suivies non terminées.
                 val targets = (seen.values.filter { it.site == s.name && it.chapters.startsWith("?") } +
                     old.values.filter { it.site == s.name && it.id !in seen && (full || !it.complete) && !fresh(it) }).distinctBy { it.id }

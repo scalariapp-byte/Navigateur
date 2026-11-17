@@ -67,7 +67,7 @@ fun NetFill(url: String, modifier: Modifier = Modifier) {
 fun BookCover(w: Work, width: Int, modifier: Modifier = Modifier) {
     val c = fandomColor(w.fandom)
     val h = (width * 1.5f).toInt()
-    Box(modifier.width(width.dp).height(h.dp).shadow(8.dp, RoundedCornerShape(6.dp)).clip(RoundedCornerShape(6.dp))
+    Box(modifier.width(width.dp).height(h.dp).clip(RoundedCornerShape(5.dp))
         .background(Brush.linearGradient(listOf(c.copy(alpha = 0.95f), c.copy(alpha = 0.45f), Color(0xFF15151E))))) {
         Column(Modifier.fillMaxSize().padding(8.dp)) {
             Box(Modifier.size(width = 3.dp, height = 22.dp).background(Color.White.copy(alpha = 0.7f)))
@@ -97,23 +97,43 @@ fun WoodPlank() {
     }
 }
 
-/** Une étagère = une collection (liste de lecture, favoris…). */
+/** Rangées de 4 livres en 3D posés sur des planches, à la largeur de l'écran. */
+@Composable
+fun BookRows(works: List<Work>, onBook: (Work) -> Unit) {
+    BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 14.dp)) {
+        val bw = ((maxWidth.value - 3 * 10 - 4 * 9 - 8) / 4).toInt().coerceIn(56, 120)
+        Column {
+            works.chunked(4).forEach { row ->
+                Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Bottom) {
+                    row.forEach { w -> Book3D(w, bw, Modifier.clickable { onBook(w) }) }
+                }
+                WoodPlank()
+                Spacer(Modifier.height(10.dp))
+            }
+        }
+    }
+}
+
+/** Une étagère = une collection (liste de lecture, fandom…) : jusqu'à 3 rangées, le reste via « Tout voir ». */
 @Composable
 fun BookShelf(title: String, works: List<Work>, onAll: () -> Unit, onBook: (Work) -> Unit) {
-    Column(Modifier.padding(bottom = 18.dp)) {
+    Column(Modifier.padding(bottom = 14.dp)) {
         Row(Modifier.padding(start = 22.dp, end = 12.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text(title, color = Txt, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(title, color = Txt, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text("${works.size} histoire" + if (works.size > 1) "s" else "", color = Mut, fontSize = 12.sp)
             }
-            Text("Tout voir ›", color = A1, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+            if (works.size > 12) Text("Tout voir ›", color = A1, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.clip(CircleShape).clickable(onClick = onAll).padding(horizontal = 10.dp, vertical = 6.dp))
         }
-        LazyRow(contentPadding = PaddingValues(horizontal = 22.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Bottom) {
-            items(works.take(30), key = { it.id }) { w -> Book3D(w, 92, Modifier.clickable { onBook(w) }) }
-        }
-        Box(Modifier.padding(horizontal = 12.dp)) { WoodPlank() }
+        BookRows(works.take(12), onBook)
     }
+}
+
+/** Étagère AO3 : un fandom, ou un crossover (fandoms triés). */
+fun fandomKey(w: Work): String {
+    val f = w.fandoms.map { it.substringBefore(" (").substringBefore(" | ").trim() }.filter { it.isNotEmpty() }.distinct().sorted()
+    return when { f.isEmpty() -> "Sans fandom"; f.size == 1 -> f[0]; else -> "Crossover : " + f.joinToString(" × ") }
 }
 
 fun collectionName(src: String) = when (src) {
