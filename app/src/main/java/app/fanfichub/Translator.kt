@@ -36,6 +36,31 @@ object Translator {
         blocks.forEachIndexed { i, e -> e.text(res[i]).attr("data-fr", "1") }
     }
 
+    /** Traduit une liste de textes ; lots de ~4 500 caractères envoyés 4 par 4 en parallèle ; cache mémoire. */
+    suspend fun texts(items: List<String>, progress: (Float) -> Unit = {}): List<String> = coroutineScope {
+        val src = items.map { it.replace(Regex("\\s+"), " ").trim() }
+        val out = src.map<String, String?> { if (it.isEmpty()) it else null }.toMutableList()
+        val todo = src.indices.filter { out[it] == null }
+        val groups = mutableListOf<List<Int>>(); var cur = mutableListOf<Int>(); var len = 0
+        for (i in todo) {
+            if (cur.isNotEmpty() && len + src[i].length > 4500) { groups += cur; cur = mutableListOf(); len = 0 }
+            cur += i; len += src[i].length + 2
+        }
+        if (cur.isNotEmpty()) groups += cur
+        val sem = Semaphore(4); var done = 0
+        groups.map { g ->
+            async {
+                sem.withPermit {
+                    val res = google(g.joinToString("\n\n") { src[it] }).split(Regex("\n\\s*\n"))
+                    if (res.size == g.size) g.forEachIndexed { k, i -> out[i] = res[k].trim() }
+                    else g.forEach { i -> out[i] = google(src[i]).trim() }
+                    done += g.size; progress(done.toFloat() / maxOf(1, todo.size))
+                }
+            }
+        }.awaitAll()
+        src.indices.map { out[it] ?: src[it] }
+    }
+
     suspend fun toFrench(html: String, progress: (Float) -> Unit): String {
         val doc = Jsoup.parseBodyFragment(html)
         var blocks = doc.select("p, h2, h3, h4, li, blockquote").filter { it.text().isNotBlank() && it.select("p, li").none { c -> c !== it } }
