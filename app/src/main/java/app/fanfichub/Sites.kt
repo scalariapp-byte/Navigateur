@@ -119,7 +119,7 @@ object Wattpad : Site {
     override val home = "https://www.wattpad.com/login"
     override val userHint = "Ton pseudo Wattpad"
     private const val B = "https://www.wattpad.com"
-    private const val F = "id,title,user(name),description,tags,completed,numParts,voteCount,mature,lastPublishedPart(createDate)"
+    private const val F = "id,title,user(name),description,tags,completed,numParts,voteCount,mature,cover,lastPublishedPart(createDate)"
     override fun owns(url: String) = "wattpad.com" in url
 
     private suspend fun json(u: String): String {
@@ -144,7 +144,7 @@ object Wattpad : Site {
         return Work("wp:$id", o.optString("title"), o.optJSONObject("user")?.optString("name") ?: "", listOf(tags.firstOrNull() ?: "Wattpad"),
             if (o.optBoolean("mature")) "Mature" else "", 0, "$n/${if (done) n else "?"}", o.optInt("voteCount"), o.optString("description").take(700),
             tags.take(14), o.optJSONObject("lastPublishedPart")?.optString("createDate")?.take(10) ?: "", done, setOf("Favori"),
-            site = name, url = "$B/story/$id")
+            site = name, url = "$B/story/$id", cover = o.optString("cover"), checked = System.currentTimeMillis())
     }
 
     override suspend fun info(url: String): Work? {
@@ -353,7 +353,7 @@ object Spirit : Site {
         return Work("sp:$s", d.selectFirst("h1")?.text() ?: s, d.selectFirst("a[href*=/perfil/]")?.text() ?: "",
             listOf(d.selectFirst("a[href*=/categorias/]")?.text() ?: name), "", digits(Regex("([\\d.]+)\\s+palavras").find(body)?.groupValues?.get(1)),
             "$n/${if (done) n else "?"}", 0, d.selectFirst("meta[name=description]")?.attr("content") ?: "", emptyList(), "", done, setOf("Favori"),
-            site = name, url = "$B/historia/$s")
+            site = name, url = "$B/historia/$s", cover = d.selectFirst("meta[property=og:image]")?.attr("content") ?: "", checked = System.currentTimeMillis())
     }
 
     override suspend fun download(w: Work): Pair<List<String>, String> {

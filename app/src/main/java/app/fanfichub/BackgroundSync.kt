@@ -25,6 +25,7 @@ class BackgroundSync(ctx: Context, p: WorkerParameters) : CoroutineWorker(ctx, p
         val hub = Hub(ctx)
         val before = hub.works.associate { it.id to it.newChapters }
         hub.sync()
+        hub.flush()
         val fresh = hub.works.filter { it.newChapters > (before[it.id] ?: 0) }
         if (fresh.isNotEmpty()) notify(ctx, fresh)
         return Result.success()

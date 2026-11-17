@@ -15,6 +15,7 @@ data class Work(
     val words: Int, val chapters: String, val kudos: Int, val summary: String, val tags: List<String>,
     val updated: String, val complete: Boolean, val sources: Set<String>,
     val newChapters: Int = 0, val progress: Float = 0f, val lastRead: Long = 0L, val site: String = "AO3", val url: String = "",
+    val cover: String = "", val checked: Long = 0L,
 ) {
     val link get() = url.ifEmpty { "${Ao3.BASE}/works/$id" }
     val published get() = chapters.substringBefore('/').trim().toIntOrNull() ?: 1
@@ -24,7 +25,7 @@ data class Work(
         put("id", id); put("title", title); put("author", author); put("fandoms", JSONArray(fandoms)); put("rating", rating)
         put("words", words); put("chapters", chapters); put("kudos", kudos); put("summary", summary); put("tags", JSONArray(tags))
         put("updated", updated); put("complete", complete); put("sources", JSONArray(sources.toList()))
-        put("newChapters", newChapters); put("progress", progress.toDouble()); put("lastRead", lastRead); put("site", site); put("url", url)
+        put("newChapters", newChapters); put("progress", progress.toDouble()); put("lastRead", lastRead); put("site", site); put("url", url); put("cover", cover); put("checked", checked)
     }
 
     companion object {
@@ -33,7 +34,7 @@ data class Work(
             o.getString("id"), o.getString("title"), o.getString("author"), o.getJSONArray("fandoms").strings(), o.optString("rating"),
             o.optInt("words"), o.optString("chapters", "1/1"), o.optInt("kudos"), o.optString("summary"), o.getJSONArray("tags").strings(),
             o.optString("updated"), o.optBoolean("complete"), o.getJSONArray("sources").strings().toSet(),
-            o.optInt("newChapters"), o.optDouble("progress", 0.0).toFloat(), o.optLong("lastRead"), o.optString("site", "AO3"), o.optString("url"),
+            o.optInt("newChapters"), o.optDouble("progress", 0.0).toFloat(), o.optLong("lastRead"), o.optString("site", "AO3"), o.optString("url"), o.optString("cover"), o.optLong("checked"),
         )
     }
 }
@@ -45,6 +46,8 @@ class Store(private val dir: File) {
     fun text(id: String) = File(dir, "w_$id.html")
     fun titles(id: String) = File(dir, "t_$id.txt")
     fun fr(id: String) = File(dir, "w_${id}_fr.html")
+    fun downloadedIds(): Set<String> = dir.list()?.filter { it.startsWith("w_") && it.endsWith(".html") && !it.endsWith("_fr.html") }
+        ?.map { it.removePrefix("w_").removeSuffix(".html") }?.toSet() ?: emptySet()
 }
 
 const val UA = "Mozilla/5.0 (Linux; Android 14) FanficHub/1.0 (lecteur personnel)"

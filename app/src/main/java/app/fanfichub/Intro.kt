@@ -212,3 +212,19 @@ fun Shelf(hub: Hub) {
 fun BookIntro(site: String, onDone: () -> Unit) {
     ShelfScene(emptyMap(), auto = site, header = false, onAll = null) { onDone() }
 }
+
+/** Étagère de l'accueil : toujours visible ; toucher un volume le fait tomber puis ouvre le site. */
+@Composable
+fun ShelfStrip(hub: Hub) {
+    Box(Modifier.fillMaxWidth().height(300.dp).padding(top = 8.dp)) {
+        Plank(Modifier.align(Alignment.BottomCenter).padding(horizontal = 18.dp))
+        Row(Modifier.fillMaxWidth().align(Alignment.BottomCenter).padding(bottom = 34.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.Bottom) {
+            BOOKS.forEach { b ->
+                Box(Modifier.clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { hub.openSite(b.site) }) {
+                    MangaSpine(b.site, b.w, b.h, hub.works.count { it.site == b.site })
+                }
+            }
+        }
+    }
+}

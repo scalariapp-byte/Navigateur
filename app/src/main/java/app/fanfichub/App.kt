@@ -29,6 +29,7 @@ sealed interface Screen {
     data class Login(val site: String) : Screen
     data class Detail(val id: String) : Screen
     data class Reader(val id: String) : Screen
+    data class Web(val url: String, val title: String) : Screen
     data class Setup(val site: String) : Screen
 }
 
@@ -66,7 +67,7 @@ class Hub(ctx: Context) {
         site = s; prefs.edit().putString("site", s).apply()
     }
     fun account(s: String) = if (s == "AO3") user else users[s]
-    fun startSync(full: Boolean = false, only: String? = null) { scope.launch { sync(full, only) } }
+    fun startSync(full: Boolean = false, only: String? = null, quick: Boolean = false) { scope.launch { sync(full, only, quick) } }
     fun startUpdate() { scope.launch { doUpdate() } }
     fun startImport(url: String) { scope.launch { importUrl(url) } }
     fun startCheck(manual: Boolean = false) { scope.launch { checkUpdate(manual) } }
@@ -109,11 +110,19 @@ class Hub(ctx: Context) {
     fun work(id: String) = works.firstOrNull { it.id == id }
     /** Recharge depuis le disque (la synchro d'arrière-plan a pu écrire entre-temps). */
     fun reload() { if (!syncing) { val l = store.load(); if (l.isNotEmpty()) { works.clear(); works.addAll(l) } } }
-    fun update(w: Work) { val i = works.indexOfFirst { it.id == w.id }; if (i >= 0) works[i] = w else works += w; store.save(works) }
+    fun update(w: Work) { val i = works.indexOfFirst { it.id == w.id }; if (i >= 0) works[i] = w else works += w; persist() }
+    private var saveJob: kotlinx.coroutines.Job? = null
+    /** Écriture disque groupée et hors du fil principal (plus de saccades). */
+    fun persist() { saveJob?.cancel(); val snap = works.toList(); saveJob = scope.launch(Dispatchers.IO) { kotlinx.coroutines.delay(400); store.save(snap) } }
+    fun flush() { saveJob?.cancel(); store.save(works.toList()) }
+    var downloaded by mutableStateOf(store.downloadedIds()); private set
+    /** Toucher un volume de l'étagère : animation puis bibliothèque du site. */
+    fun openSite(s: String) { if (bookAnim) intro = s else enterSite(s) }
+    fun enterSite(s: String) { pickSite(s); tab = 1; if (s != "ALL" && account(s) == null) push(Screen.Setup(s)) }
     fun saveUser(u: String?) { user = u?.trim()?.ifEmpty { null }; prefs.edit().putString("user", user).apply() }
     fun setReader(t: Int = theme, s: Int = size) { theme = t; size = s.coerceIn(14, 30); prefs.edit().putInt("theme", theme).putInt("size", size).apply() }
     fun logout() { CookieManager.getInstance().removeAllCookies(null); saveUser(null) }
-    fun hasText(id: String) = store.text(id).exists()
+    fun hasText(id: String) = id in downloaded
     fun text(id: String) = store.text(id).readText()
     fun hasFr(id: String) = store.fr(id).exists()
     fun textFr(id: String) = store.fr(id).readText()
@@ -125,12 +134,14 @@ class Hub(ctx: Context) {
     suspend fun download(id: String) {
         val w = work(id) ?: return
         val (t, html) = if (w.site == "AO3") withContext(Dispatchers.IO) { Ao3.download(id) } else Sites.of(w.site)!!.download(w)
-        store.text(id).writeText(html); store.titles(id).writeText(t.joinToString("\n")); store.fr(id).delete()
+        store.text(id).writeText(html); store.titles(id).writeText(t.joinToString("\n")); store.fr(id).delete(); downloaded = downloaded + id
         work(id)?.let { update(it.copy(newChapters = 0)) }
     }
 
     /** Synchro incrémentale : s'arrête dès que les pages ne contiennent plus que des fanfictions connues et inchangées. */
-    suspend fun sync(full: Boolean = false, only: String? = null) {
+    suspend fun sync(full: Boolean = false, only: String? = null, quick: Boolean = false) {
+        val now = System.currentTimeMillis()
+        fun fresh(w: Work) = quick && now - w.checked < 3 * 3_600_000L
         val u = user.takeIf { only == null || only == "AO3" }
         if (only != null && account(only) == null && works.none { it.site == only }) { status = "Configure d'abord ton compte $only"; return }
         if (u == null && users.isEmpty() && works.none { it.site != "AO3" }) { status = "Connecte un compte pour synchroniser"; return }
@@ -147,9 +158,10 @@ class Hub(ctx: Context) {
                 val o = old[f.id]
                 val gained = if (o == null || o.chapters.startsWith("?") || f.chapters.startsWith("?")) 0 else maxOf(0, f.published - o.published)
                 merged[f.id] = if (o == null) f else if (f.chapters.startsWith("?") && !o.chapters.startsWith("?")) o.copy(sources = o.sources + f.sources) else f.copy(newChapters = o.newChapters + gained,
-                    progress = o.progress, lastRead = o.lastRead, sources = if (full) f.sources else o.sources + f.sources)
+                    progress = o.progress, lastRead = o.lastRead, sources = if (full) f.sources else o.sources + f.sources,
+                    checked = maxOf(f.checked, o.checked), cover = f.cover.ifEmpty { o.cover })
             }
-            works.clear(); works.addAll(merged.values); store.save(works)
+            works.clear(); works.addAll(merged.values); persist()
         }
         suspend fun pages(start: String, src: String, max: Int, stop: (List<Work>) -> Boolean) {
             var url: String? = start; var n = 0
@@ -182,12 +194,13 @@ class Hub(ctx: Context) {
                             val w: Work? = when {
                                 inSeen != null -> inSeen.copy(sources = setOf("Abonnement"))
                                 known != null && known.complete && !full -> known.copy(sources = known.sources + "Abonnement")
+                                known != null && !full && fresh(known) -> known.copy(sources = known.sources + "Abonnement")
                                 known != null && !full -> {
                                     val n = withContext(Dispatchers.IO) { Ao3.chapterCount(id) }
-                                    if (n != null && n <= known.published) known.copy(sources = known.sources + "Abonnement")
-                                    else withContext(Dispatchers.IO) { Ao3.work(id, "Abonnement") }
+                                    if (n != null && n <= known.published) known.copy(sources = known.sources + "Abonnement", checked = now)
+                                    else withContext(Dispatchers.IO) { Ao3.work(id, "Abonnement") }?.copy(checked = now)
                                 }
-                                else -> withContext(Dispatchers.IO) { Ao3.work(id, "Abonnement") }
+                                else -> withContext(Dispatchers.IO) { Ao3.work(id, "Abonnement") }?.copy(checked = now)
                             }
                             w?.let { add(it) }
                             done++; status = "AO3 · abonnements $done/${todo.size}"; syncProgress = done.toFloat() / todo.size
@@ -209,10 +222,10 @@ class Hub(ctx: Context) {
                 }.onFailure { siteStatus[s.name] = "Erreur : ${it.message}" }
                 // Détails : fiches encore incomplètes (« ?/? ») et fanfictions suivies non terminées.
                 val targets = (seen.values.filter { it.site == s.name && it.chapters.startsWith("?") } +
-                    old.values.filter { it.site == s.name && it.id !in seen && (full || !it.complete) }).distinctBy { it.id }
+                    old.values.filter { it.site == s.name && it.id !in seen && (full || !it.complete) && !fresh(it) }).distinctBy { it.id }
                 targets.forEachIndexed { i, w ->
                     status = "${s.name} · détails ${i + 1}/${targets.size}"; syncProgress = (i + 1f) / targets.size
-                    runCatching { s.info(w.link) }.getOrNull()?.let { add(it.copy(sources = seen[w.id]?.sources ?: w.sources)) }
+                    runCatching { s.info(w.link) }.getOrNull()?.let { add(it.copy(sources = seen[w.id]?.sources ?: w.sources, checked = now)) }
                     if (i % 4 == 3) publish()
                 }
                 publish()
@@ -227,7 +240,7 @@ class Hub(ctx: Context) {
         } finally { syncing = false; syncProgress = null }
     }
 
-    fun syncDue() = user != null && System.currentTimeMillis() - prefs.getLong("lastSync", 0) > 20 * 60_000
+    fun syncDue(minutes: Int = 20) = (user != null || users.isNotEmpty()) && System.currentTimeMillis() - prefs.getLong("lastSync", 0) > minutes * 60_000L
 }
 
 class MainActivity : ComponentActivity() {
@@ -235,6 +248,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(b)
         enableEdgeToEdge()
         Web.app = applicationContext
+        Img.dir = java.io.File(cacheDir, "img").apply { mkdirs() }
         hub = Hub(this)
         handle(intent)
         setContent { HubApp(hub) }
@@ -243,7 +257,11 @@ class MainActivity : ComponentActivity() {
             requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
     }
 
-    override fun onResume() { super.onResume(); if (::hub.isInitialized) hub.reload() }
+    override fun onResume() {
+        super.onResume()
+        if (::hub.isInitialized) { hub.reload(); if (hub.syncDue(2)) hub.startSync(quick = true) }
+    }
+    override fun onPause() { super.onPause(); if (::hub.isInitialized) hub.flush() }
 
     private lateinit var hub: Hub
     private fun handle(i: Intent?) { if (i?.action == Intent.ACTION_SEND) i.getStringExtra(Intent.EXTRA_TEXT)?.let { hub.pendingImport = it } }

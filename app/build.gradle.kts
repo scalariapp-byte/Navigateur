@@ -23,6 +23,7 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation("org.jsoup:jsoup:1.18.3")
     implementation("androidx.work:work-runtime-ktx:2.10.1")
+    implementation("androidx.webkit:webkit:1.12.1")
     implementation("com.google.mlkit:translate:17.0.3")
     implementation("com.google.mlkit:language-id:17.0.6")
 }
