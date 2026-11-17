@@ -48,8 +48,8 @@ object Translator {
             while (j < blocks.size && (j == i || len + blocks[j].text().length < 4500)) { len += blocks[j].text().length + 2; j++ }
             val group = blocks.subList(i, j)
             val out = google(group.joinToString("\n\n") { it.text() }).split(Regex("\n\\s*\n"))
-            if (out.size == group.size) group.forEachIndexed { k, e -> e.text(out[k].trim()) }
-            else group.forEach { e -> e.text(google(e.text())) } // découpage différent : un par un
+            if (out.size == group.size) group.forEachIndexed { k, e -> e.text(out[k].trim()).attr("data-fr", "1") }
+            else group.forEach { e -> e.text(google(e.text())).attr("data-fr", "1") } // découpage différent : un par un
             i = j
             progress(i.toFloat() / blocks.size)
             delay(150)
@@ -83,6 +83,7 @@ object Translator {
             try { viaMlKit(blocks, sample, progress) } catch (e2: Exception) { error("${e.message} ; traducteur hors ligne : ${e2.message ?: e2.javaClass.simpleName}") }
         }
         progress(1f)
+        doc.select("[data-fr]").removeAttr("data-fr")
         return doc.body().html()
     }
 }
