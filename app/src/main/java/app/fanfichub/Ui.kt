@@ -576,6 +576,8 @@ fun Accounts(hub: Hub) {
                 }
             }
             Line()
+            SettingRow({ RoundIcon(Icons.Default.Info, A2) }, "Traduction automatique", "Résumés et chapitres en français", trail = { Switch(hub.autoTr) }) { hub.toggleAutoTr(!hub.autoTr) }
+            Line()
             Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Taille du texte", color = Txt, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                 Text("A−", color = Txt, fontSize = 17.sp, modifier = Modifier.clip(CircleShape).clickable { hub.setReader(s = hub.size - 1) }.padding(12.dp))
@@ -798,17 +800,18 @@ fun Detail(hub: Hub, id: String) {
                     Spacer(Modifier.height(10.dp))
                     GhostButton("Lire sur ${w.site} (dans l'app)") { hub.push(Screen.Web(w.link, w.title)) }
                     if (w.summary.isNotBlank()) {
-                        var showFr by remember(id) { mutableStateOf(false) }
+                        var showFr by remember(id) { mutableStateOf(hub.autoTr) }
                         var pre by remember(id) { mutableStateOf<String?>(null) } // préchargé, jamais enregistré
                         LaunchedEffect(id) { runCatching { Translator.texts(listOf(w.summary)).first() }.onSuccess { pre = it } }
                         val sumFr = if (showFr) pre else null
-                        val sumBusy = showFr && pre == null
+                        val sumBusy = showFr && pre == null && !hub.autoTr
                         Row(Modifier.padding(top = 28.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text("Résumé", color = Txt, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                             FilterPill(if (sumBusy) "Traduction…" else if (sumFr != null) "VO" else "Traduire", sumFr == null) {
                                 showFr = !showFr
                             }
                         }
+                        if (showFr && pre != null) Text("Traduit automatiquement", color = A1, fontSize = 12.sp, modifier = Modifier.padding(bottom = 4.dp))
                         Text(sumFr ?: w.summary, color = Sub, fontSize = 15.sp, lineHeight = 23.sp)
                     }
                     if (w.tags.isNotEmpty()) {

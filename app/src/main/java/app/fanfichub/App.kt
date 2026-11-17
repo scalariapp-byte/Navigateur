@@ -138,6 +138,9 @@ class Hub(ctx: Context) {
     val trProgress = mutableStateMapOf<String, Float>()
     val trError = mutableStateMapOf<String, String>()
     var webFr by mutableStateOf(prefs.getBoolean("webFr", false)); private set
+    /** Traduction automatique en français (résumés et lecteur). */
+    var autoTr by mutableStateOf(prefs.getBoolean("autoTr", true)); private set
+    fun toggleAutoTr(v: Boolean) { autoTr = v; prefs.edit().putBoolean("autoTr", v).apply() }
     fun toggleWebFr(v: Boolean) { webFr = v; prefs.edit().putBoolean("webFr", v).apply() }
 
     fun pretranslate(id: String) {
@@ -182,7 +185,8 @@ class Hub(ctx: Context) {
                 val gained = if (o == null || o.chapters.startsWith("?") || f.chapters.startsWith("?")) 0 else maxOf(0, f.published - o.published)
                 merged[f.id] = if (o == null) f else if (f.chapters.startsWith("?") && !o.chapters.startsWith("?")) o.copy(sources = o.sources + f.sources) else f.copy(newChapters = o.newChapters + gained,
                     progress = o.progress, lastRead = o.lastRead, sources = if (full) f.sources else o.sources + f.sources,
-                    checked = maxOf(f.checked, o.checked), cover = f.cover.ifEmpty { o.cover })
+                    checked = maxOf(f.checked, o.checked), cover = f.cover.ifEmpty { o.cover },
+                    summary = f.summary.ifBlank { o.summary }, author = f.author.ifBlank { o.author })
             }
             works.clear(); works.addAll(merged.values); persist()
         }
@@ -245,7 +249,8 @@ class Hub(ctx: Context) {
                     siteStatus[s.name] = "${l.size} fanfictions synchronisées"
                 }.onFailure { e -> siteStatus[s.name] = if (old.values.any { it.site == s.name }) "Synchro partielle : ${e.message}" else "Erreur : ${e.message}" }
                 // Détails : fiches encore incomplètes (« ?/? ») et fanfictions suivies non terminées.
-                val targets = (seen.values.filter { it.site == s.name && it.chapters.startsWith("?") } +
+                fun noSummary(w: Work) = w.summary.isBlank() && old[w.id]?.summary.isNullOrBlank() && !(quick && (old[w.id]?.let { now - it.checked < 3 * 3_600_000L } == true))
+                val targets = (seen.values.filter { it.site == s.name && (it.chapters.startsWith("?") || noSummary(it)) } +
                     old.values.filter { it.site == s.name && it.id !in seen && (full || !it.complete) && !fresh(it) }).distinctBy { it.id }
                 targets.forEachIndexed { i, w ->
                     status = "${s.name} · détails ${i + 1}/${targets.size}"; syncProgress = (i + 1f) / targets.size

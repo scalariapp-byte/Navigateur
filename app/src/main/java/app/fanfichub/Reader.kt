@@ -71,7 +71,7 @@ fun Reader(hub: Hub, id: String) {
     var web by remember { mutableStateOf<WebView?>(null) }
     var loaded by remember { mutableIntStateOf(-1) }
     var fr by remember { mutableStateOf(hub.hasFr(id)) }
-    var wantFr by remember { mutableStateOf(false) }
+    var wantFr by remember { mutableStateOf(hub.autoTr) }
     val trProgress = hub.trProgress[id]
     val trError = hub.trError[id]
     LaunchedEffect(id) { hub.pretranslate(id) }

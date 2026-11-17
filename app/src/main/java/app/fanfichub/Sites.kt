@@ -316,12 +316,14 @@ object Ffn : Site {
     private fun ratedOf(t: String) = Regex("rated:\\s*(?:fiction\\s*)?([KTM]\\+?)", IC).find(t)?.groupValues?.get(1)
         ?: Regex(",\\s*([KTM]\\+?)\\s*,").find(t)?.groupValues?.get(1) ?: ""
 
-    private fun work(id: String, title: String, author: String, fandom: String, meta: String, summary: String = "") : Work {
+    private fun work(id: String, title: String, author: String, fandom: String, meta: String, summary: String = "", cover: String = "") : Work {
         val n = chaptersOf(meta); val done = completeOf(meta)
         return Work("ffn:$id", title.ifBlank { "Histoire $id" }, author, listOf(fandom.ifBlank { name }), ratedOf(meta), words(meta),
             "$n/${if (done) n else "?"}", favsOf(meta), summary, emptyList(), Regex("updated:\\s*([^,]+)", IC).find(meta)?.groupValues?.get(1)?.trim() ?: "",
-            done, setOf("Favori"), site = name, url = "$B/s/$id", checked = System.currentTimeMillis())
+            done, setOf("Favori"), site = name, url = "$B/s/$id", cover = cover, checked = System.currentTimeMillis())
     }
+    private fun img(e: org.jsoup.nodes.Element?): String = e?.let { it.absUrl("data-original").ifBlank { it.absUrl("src") } }?.replace("/75/", "/180/")?.takeIf { it.startsWith("http") } ?: ""
+    private fun metaDesc(d: Document) = (d.selectFirst("meta[name=description]")?.attr("content") ?: d.selectFirst("meta[property=og:description]")?.attr("content") ?: "").trim()
 
     override suspend fun info(url: String): Work? {
         val id = Regex("/s/(\\d+)").find(url)?.groupValues?.get(1) ?: return null
@@ -335,7 +337,8 @@ object Ffn : Site {
         val fandom = d.select("#pre_story_links a").lastOrNull()?.text() ?: Regex(", an? (.+?) fanfic", IC).find(pageTitle)?.groupValues?.get(1) ?: name
         val metaEl = d.select("span.xgray, div.gray, .gray, div").firstOrNull { Regex("words?:", IC).containsMatchIn(it.ownText()) || Regex("words?:", IC).containsMatchIn(it.text()) && it.text().length < 600 }
         return work(id, title, d.selectFirst("a[href^=/u/]")?.text() ?: "", fandom, metaEl?.text() ?: text.take(2000),
-            d.selectFirst("#profile_top div.xcontrast_txt")?.text() ?: "")
+            d.selectFirst("#profile_top div.xcontrast_txt")?.text()?.ifBlank { null } ?: metaDesc(d),
+            img(d.selectFirst("#profile_top img.cimage, img.cimage")).ifBlank { d.selectFirst("meta[property=og:image]")?.attr("content") ?: "" })
     }
 
     override suspend fun download(w: Work): Pair<List<String>, String> {
@@ -362,7 +365,8 @@ object Ffn : Site {
                 val box = generateSequence(a.parent()) { it.parent() }.firstOrNull { it.text().length > a.text().length + 20 || it.tagName() == "div" } ?: a.parent() ?: return@forEach
                 val meta = box.selectFirst(".gray, .xgray, .z-padtop2")?.text() ?: box.text()
                 val fandom = meta.substringBefore(",").takeIf { it.length in 2..60 && !it.contains(":") } ?: ""
-                out[id] = work(id, a.text(), box.selectFirst("a[href^=/u/]")?.text() ?: "", fandom, meta)
+                out[id] = work(id, a.text(), box.selectFirst("a[href^=/u/]")?.text() ?: "", fandom, meta,
+                    box.selectFirst(".z-indent, .z-padtop")?.ownText() ?: "", img(box.selectFirst("img")))
                 added++
             }
             if (added == 0) break
@@ -429,12 +433,15 @@ object Spirit : Site {
         val ic = RegexOption.IGNORE_CASE
         val titles = LinkedHashMap<String, String>()          // slug -> titre
         val sources = LinkedHashMap<String, MutableSet<String>>() // slug -> collections
+        val covers = HashMap<String, String>()
         fun addStories(d: Document, src: String) {
             d.select("a[href*=/historia/]").forEach { a ->
                 val sl = slug(a.attr("href")) ?: return@forEach
                 if (Regex("/historia/$sl/").containsMatchIn(a.attr("href"))) return@forEach // lien de chapitre
                 if (titles[sl].isNullOrBlank() && a.text().isNotBlank()) titles[sl] = a.text() else titles.putIfAbsent(sl, "")
                 sources.getOrPut(sl) { mutableSetOf() } += src
+                val im = (a.selectFirst("img") ?: a.parent()?.selectFirst("img"))?.let { it.absUrl("data-src").ifBlank { it.absUrl("src") } }
+                if (!im.isNullOrBlank() && im.startsWith("http") && sl !in covers) covers[sl] = im
             }
         }
         // Favoris et bibliothèque
@@ -466,9 +473,9 @@ object Spirit : Site {
         if (titles.isEmpty()) error("aucune histoire trouvée (favoris, bibliothèque et listes vides ou privés ; connecte-toi à l'étape 1)")
         return titles.map { (sl, t) ->
             val src = sources[sl] ?: mutableSetOf("Favori")
-            known["sp:$sl"]?.copy(sources = src)
+            known["sp:$sl"]?.let { k -> k.copy(sources = src, cover = k.cover.ifEmpty { covers[sl] ?: "" }) }
                 ?: Work("sp:$sl", t.ifBlank { sl.substringBeforeLast('-').replace('-', ' ') }, "", listOf(name), "", 0, "?/?", 0, "", emptyList(), "", false, src,
-                    site = name, url = "$B/historia/$sl")
+                    site = name, url = "$B/historia/$sl", cover = covers[sl] ?: "")
         }
     }
 }
