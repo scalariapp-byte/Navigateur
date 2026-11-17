@@ -306,7 +306,13 @@ fun Home(hub: Hub) {
     LaunchedEffect(Unit) { hub.startCheck(); if (hub.syncDue(2)) hub.startSync(quick = true) }
     LaunchedEffect(hub.pendingImport) { hub.pendingImport?.let { hub.pendingImport = null; hub.startImport(it) } }
     Box(Modifier.fillMaxSize()) {
-        PullToRefreshBox(isRefreshing = false, onRefresh = { hub.startSync(only = hub.site?.takeIf { it != "ALL" }) }, modifier = Modifier.fillMaxSize()) {
+        var pulling by remember { mutableStateOf(false) }
+        val pullScope = rememberCoroutineScope()
+        PullToRefreshBox(isRefreshing = pulling, onRefresh = {
+            pulling = true
+            hub.startSync(only = hub.site?.takeIf { it != "ALL" })
+            pullScope.launch { delay(700); pulling = false } // l'indicateur se range, la synchro continue en silence
+        }, modifier = Modifier.fillMaxSize()) {
             when (hub.tab) { 0 -> Feed(hub); 1 -> Library(hub); 2 -> SearchTab(hub); else -> Accounts(hub) }
         }
         Box(Modifier.fillMaxWidth().windowInsetsTopHeight(WindowInsets.statusBars).background(Bg))
