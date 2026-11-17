@@ -107,6 +107,9 @@ class Hub(ctx: Context) {
     fun logout() { CookieManager.getInstance().removeAllCookies(null); saveUser(null) }
     fun hasText(id: String) = store.text(id).exists()
     fun text(id: String) = store.text(id).readText()
+    fun hasFr(id: String) = store.fr(id).exists()
+    fun textFr(id: String) = store.fr(id).readText()
+    suspend fun translate(id: String, progress: (Float) -> Unit) { store.fr(id).writeText(Translator.toFrench(text(id), progress)) }
     fun titles(id: String) = store.titles(id).takeIf { it.exists() }?.readLines() ?: emptyList()
 
     suspend fun detectUser() { withContext(Dispatchers.IO) { Ao3.username() }?.let { saveUser(it) } }
@@ -114,7 +117,7 @@ class Hub(ctx: Context) {
     suspend fun download(id: String) {
         val w = work(id) ?: return
         val (t, html) = if (w.site == "AO3") withContext(Dispatchers.IO) { Ao3.download(id) } else Sites.of(w.site)!!.download(w)
-        store.text(id).writeText(html); store.titles(id).writeText(t.joinToString("\n"))
+        store.text(id).writeText(html); store.titles(id).writeText(t.joinToString("\n")); store.fr(id).delete()
         work(id)?.let { update(it.copy(newChapters = 0)) }
     }
 

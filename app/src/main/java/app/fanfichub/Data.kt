@@ -44,6 +44,7 @@ class Store(private val dir: File) {
     fun save(list: List<Work>) = f.writeText(JSONArray(list.map { it.json() }).toString())
     fun text(id: String) = File(dir, "w_$id.html")
     fun titles(id: String) = File(dir, "t_$id.txt")
+    fun fr(id: String) = File(dir, "w_${id}_fr.html")
 }
 
 const val UA = "Mozilla/5.0 (Linux; Android 14) FanficHub/1.0 (lecteur personnel)"

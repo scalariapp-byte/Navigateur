@@ -35,6 +35,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import kotlinx.coroutines.launch
 
 private fun esc(s: String) = TextUtils.htmlEncode(s)
 private fun hex(c: Long) = String.format("#%06X", c and 0xFFFFFFL)
@@ -69,10 +70,13 @@ fun Reader(hub: Hub, id: String) {
     var toc by remember { mutableStateOf(false) }
     var web by remember { mutableStateOf<WebView?>(null) }
     var loaded by remember { mutableIntStateOf(-1) }
+    var fr by remember { mutableStateOf(hub.hasFr(id)) }
+    var trProgress by remember { mutableStateOf<Float?>(null) }
+    var trError by remember { mutableStateOf<String?>(null) }
     val t = THEMES[hub.theme]
     val bg = Color(t.second)
     val fg = Color(t.third)
-    val key = hub.theme * 100 + hub.size
+    val key = hub.theme * 100 + hub.size + if (fr) 10_000 else 0
 
     DisposableEffect(id) {
         onDispose { hub.work(id)?.let { hub.update(it.copy(progress = progress, lastRead = System.currentTimeMillis(), newChapters = 0)) } }
@@ -100,7 +104,7 @@ fun Reader(hub: Hub, id: String) {
                 if (loaded != key) {
                     loaded = key
                     v.setBackgroundColor(bg.toArgb())
-                    v.loadDataWithBaseURL(Ao3.BASE, readerHtml(w, hub.text(id), hub.theme, hub.size), "text/html", "utf-8", null)
+                    v.loadDataWithBaseURL(Ao3.BASE, readerHtml(w, if (fr && hub.hasFr(id)) hub.textFr(id) else hub.text(id), hub.theme, hub.size), "text/html", "utf-8", null)
                 }
             },
             modifier = Modifier.fillMaxSize(),
@@ -118,8 +122,28 @@ fun Reader(hub: Hub, id: String) {
                     Text(w.title, color = Txt, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text("${(progress * 100).toInt()} % · ${w.chapters} chapitres", color = Mut, fontSize = 12.sp)
                 }
+                Text(trProgress?.let { "${(it * 100).toInt()} %" } ?: if (fr) "VO" else if (hub.hasFr(id)) "FR" else "Traduire",
+                    color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(end = 8.dp).clip(CircleShape).background(Grad).clickable {
+                        if (trProgress != null) return@clickable
+                        if (hub.hasFr(id)) { fr = !fr; return@clickable }
+                        trProgress = 0f; trError = null
+                        hub.scope.launch {
+                            try { hub.translate(id) { trProgress = it }; fr = true } catch (e: Exception) { trError = e.message ?: "Traduction impossible" }
+                            trProgress = null
+                        }
+                    }.padding(horizontal = 14.dp, vertical = 9.dp))
                 if (titles.size > 1) CircleIcon(Icons.AutoMirrored.Filled.List) { toc = !toc }
             }
+        }
+
+        trError?.let {
+            Text("Traduction : $it", color = Color.White, fontSize = 13.sp, modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 80.dp, start = 20.dp, end = 20.dp)
+                .clip(RoundedCornerShape(14.dp)).background(Color(0xFFB91C1C)).clickable { trError = null }.padding(12.dp))
+        }
+        trProgress?.let {
+            Text("Traduction en français… ${(it * 100).toInt()} %" + if (it == 0f) " (téléchargement du modèle de langue la 1re fois)" else "", color = Txt, fontSize = 13.sp,
+                modifier = Modifier.align(Alignment.Center).padding(24.dp).clip(RoundedCornerShape(16.dp)).background(Surf2).padding(16.dp))
         }
 
         AnimatedVisibility(panel, modifier = Modifier.align(Alignment.BottomCenter), enter = fadeIn() + slideInVertically { it }, exit = fadeOut() + slideOutVertically { it }) {
