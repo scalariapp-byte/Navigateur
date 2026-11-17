@@ -555,7 +555,7 @@ fun Accounts(hub: Hub) {
                     .forEachIndexed { i, (name, bg, fg) ->
                         Column(Modifier.weight(1f).clip(RoundedCornerShape(16.dp)).background(bg)
                             .border(2.dp, if (themeMode == i) A1 else Color.Gray.copy(alpha = 0.25f), RoundedCornerShape(16.dp))
-                            .clickable { hub.setTheme(i) }.padding(vertical = 14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            .clickable { hub.setAppTheme(i) }.padding(vertical = 14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                             Box(Modifier.size(28.dp).clip(CircleShape).background(Grad))
                             Text(name, color = fg, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
                         }

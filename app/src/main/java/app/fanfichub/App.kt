@@ -57,7 +57,7 @@ class Hub(ctx: Context) {
     }
     suspend fun awaitLoad() = loadJob.join()
     init { themeMode = prefs.getInt("themeMode", if (prefs.getBoolean("amoled", true)) 0 else 1) }
-    fun setTheme(m: Int) { themeMode = m; prefs.edit().putInt("themeMode", m).apply() }
+    fun setAppTheme(m: Int) { themeMode = m; prefs.edit().putInt("themeMode", m).apply() }
     /** Les tâches longues vivent ici : changer d'écran ne les interrompt plus. */
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     var site by mutableStateOf(prefs.getString("site", null)); private set
