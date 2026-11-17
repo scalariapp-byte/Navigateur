@@ -212,7 +212,7 @@ data class SiteUi(val name: String, val logo: String, val color: Color, val desc
 
 val SITE_UI = listOf(
     SiteUi("AO3", "AO3", Color(0xFFE5484D), "Favoris, à lire plus tard et abonnements", "Connecte-toi avec ton identifiant AO3 : le pseudo est détecté tout seul."),
-    SiteUi("Wattpad", "W", Color(0xFFFF7A1A), "Bibliothèque et listes de lecture", "Connecte-toi sur Wattpad, puis indique ton pseudo (celui de ton profil, sans @)."),
+    SiteUi("Wattpad", "W", Color(0xFFFF7A1A), "Bibliothèque et listes de lecture", "Cherche ton compte et choisis-le : tes listes de lecture publiques seront récupérées, sans connexion."),
     SiteUi("FanFiction.net", "FF", Color(0xFF3E7BFA), "Histoires favorites de ton profil", "Copie le lien de ton profil (fanfiction.net/u/123456…). La connexion n'est utile que si le site demande une vérification."),
     SiteUi("Spirit Fanfics", "S", Color(0xFF22C3A6), "Ta bibliothèque Spirit", "Connecte-toi sur Spirit, puis indique ton pseudo."),
 )
@@ -549,10 +549,10 @@ fun Setup(hub: Hub, name: String) {
             }
             Column(Modifier.padding(20.dp).navigationBarsPadding()) {
                 Text(s.how, color = Color(0xFFCFCFDA), fontSize = 14.sp, lineHeight = 21.sp, modifier = Modifier.padding(bottom = 18.dp))
-                Step(1, "Se connecter sur le site", "Une page du vrai site s'ouvre. Connecte-toi avec ton e-mail et ton mot de passe (le bouton Google ne marche pas ici).") {
+                if (name != "Wattpad") Step(1, "Se connecter sur le site", "Une page du vrai site s'ouvre. Connecte-toi avec ton e-mail et ton mot de passe (le bouton Google ne marche pas ici).") {
                     FilterPill("Ouvrir ${s.name}", true) { hub.push(Screen.Login(name)) }
                 }
-                if (name == "Wattpad") Step(2, "Trouve ton compte", "Tape ton pseudo ou ton nom, puis appuie sur ton profil dans la liste.") {
+                if (name == "Wattpad") Step(1, "Trouve ton compte", "Tape ton pseudo ou ton nom, puis appuie sur ton profil dans la liste.") {
                     var results by remember { mutableStateOf<List<Wattpad.Account>>(emptyList()) }
                     var searching by remember { mutableStateOf(false) }
                     LaunchedEffect(v) {
@@ -605,7 +605,7 @@ fun Setup(hub: Hub, name: String) {
                         if (acc != null) FilterPill("Retirer", false) { hub.saveSiteUser(name, null); check = null }
                     }
                 }
-                Step(if (name == "AO3") 2 else 3, "Synchroniser", "Récupère tes fanfictions. Tu peux changer de page pendant ce temps.") {
+                Step(if (name == "AO3" || name == "Wattpad") 2 else 3, "Synchroniser", "Récupère tes fanfictions. Tu peux changer de page pendant ce temps.") {
                     FilterPill(if (hub.syncing) "En cours…" else "Synchroniser", true) { hub.pickSite(name); hub.startSync(); hub.pop(); hub.tab = 0 }
                 }
                 if (name == "AO3" && acc != null) GhostButton("Se déconnecter d'AO3") { hub.logout() }
