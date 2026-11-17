@@ -250,7 +250,8 @@ class Hub(ctx: Context) {
                 }.onFailure { e -> siteStatus[s.name] = if (old.values.any { it.site == s.name }) "Synchro partielle : ${e.message}" else "Erreur : ${e.message}" }
                 // Détails : fiches encore incomplètes (« ?/? ») et fanfictions suivies non terminées.
                 fun noSummary(w: Work) = w.summary.isBlank() && old[w.id]?.summary.isNullOrBlank() && !(quick && (old[w.id]?.let { now - it.checked < 3 * 3_600_000L } == true))
-                val targets = (seen.values.filter { it.site == s.name && (it.chapters.startsWith("?") || noSummary(it)) } +
+                fun slugTitle(w: Work) = Regex("^[a-z0-9-]+-\\d+$").matches(w.title)
+                val targets = (seen.values.filter { it.site == s.name && (it.chapters.startsWith("?") || noSummary(it) || slugTitle(old[it.id] ?: it)) } +
                     old.values.filter { it.site == s.name && it.id !in seen && (full || !it.complete) && !fresh(it) }).distinctBy { it.id }
                 targets.forEachIndexed { i, w ->
                     status = "${s.name} · détails ${i + 1}/${targets.size}"; syncProgress = (i + 1f) / targets.size

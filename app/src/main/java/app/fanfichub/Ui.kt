@@ -764,7 +764,7 @@ fun Detail(hub: Hub, id: String) {
                         Text(w.fandoms.joinToString(" · ").uppercase(), color = Color.White.copy(alpha = 0.85f), fontSize = 12.sp, fontWeight = FontWeight.Bold,
                             letterSpacing = 1.5.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         Text(w.title, color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, lineHeight = 37.sp, modifier = Modifier.padding(top = 10.dp))
-                        Text("par ${w.author}", color = Color.White.copy(alpha = 0.8f), fontSize = 16.sp, modifier = Modifier.padding(top = 8.dp))
+                        if (w.author.isNotBlank()) Text("par ${w.author}", color = Color.White.copy(alpha = 0.8f), fontSize = 16.sp, modifier = Modifier.padding(top = 8.dp))
                         FlowRow(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             if (w.newChapters > 0) NewBadge(w.newChapters)
                             if (w.rating.isNotEmpty()) Pill(w.rating, Color.White)

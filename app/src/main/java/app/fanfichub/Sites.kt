@@ -410,16 +410,27 @@ object Spirit : Site {
         d.select("a[href*=/historia/$s/]").filter { Regex("/historia/$s/[^/?#]+").containsMatchIn(it.attr("href")) && it.text().isNotBlank() }
             .map { it.absUrl("href").substringBefore('#') to it.text() }.distinctBy { it.first }
 
+    private fun pretty(sl: String) = sl.substringBeforeLast('-').replace('-', ' ').replaceFirstChar { it.uppercase() }
+
     override suspend fun info(url: String): Work? {
         val s = slug(url) ?: return null
         val d = Web.html("$B/historia/$s")
         val body = d.text()
-        val n = chapters(d, s).size.coerceAtLeast(1)
-        val done = Regex("Conclu[ií]da|Terminada|Completa", RegexOption.IGNORE_CASE).containsMatchIn(body)
-        return Work("sp:$s", d.selectFirst("h1")?.text() ?: s, d.selectFirst("a[href*=/perfil/]")?.text() ?: "",
-            listOf(d.selectFirst("a[href*=/categorias/]")?.text() ?: name), "", digits(Regex("([\\d.]+)\\s+palavras").find(body)?.groupValues?.get(1)),
-            "$n/${if (done) n else "?"}", 0, d.selectFirst("meta[name=description]")?.attr("content") ?: "", emptyList(), "", done, setOf("Favori"),
-            site = name, url = "$B/historia/$s", cover = d.selectFirst("meta[property=og:image]")?.attr("content") ?: "", checked = System.currentTimeMillis())
+        val ic = RegexOption.IGNORE_CASE
+        val og = d.selectFirst("meta[property=og:title]")?.attr("content").orEmpty()
+        val head = d.title() + " " + og
+        // « Titre - História escrita por Auteur - Spirit Fanfics e Histórias »
+        val raw = d.selectFirst("h1")?.text()?.takeIf { it.isNotBlank() } ?: og.ifBlank { d.title() }
+        val title = raw.split(Regex(" - Hist[óo]ria| - Spirit| \\| ", ic))[0].trim().takeIf { it.isNotBlank() && it != s } ?: pretty(s)
+        val author = Regex("escrita por ([^-|]+)", ic).find(head)?.groupValues?.get(1)?.trim()
+            ?: d.selectFirst("[itemprop=author], .autor a, a[rel=author]")?.text()?.trim() ?: ""
+        val n = maxOf(chapters(d, s).size, Regex("(\\d+)\\s+cap[ií]tulos?", ic).find(body)?.groupValues?.get(1)?.toIntOrNull() ?: 0).coerceAtLeast(1)
+        val done = Regex("Conclu[ií]da|Terminada|Completa", ic).containsMatchIn(body)
+        return Work("sp:$s", title, author, listOf(d.selectFirst("a[href*=/categorias/]")?.text() ?: name), "",
+            digits(Regex("([\\d.]+)\\s+palavras", ic).find(body)?.groupValues?.get(1)),
+            "$n/${if (done) n else "?"}", 0, (d.selectFirst("meta[name=description]")?.attr("content") ?: d.selectFirst("meta[property=og:description]")?.attr("content") ?: "").trim(),
+            emptyList(), "", done, setOf("Favori"), site = name, url = "$B/historia/$s",
+            cover = d.selectFirst("meta[property=og:image]")?.attr("content") ?: "", checked = System.currentTimeMillis())
     }
 
     override suspend fun download(w: Work): Pair<List<String>, String> {
