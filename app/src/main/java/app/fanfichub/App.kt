@@ -13,7 +13,10 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -26,6 +29,7 @@ sealed interface Screen {
     data class Login(val site: String) : Screen
     data class Detail(val id: String) : Screen
     data class Reader(val id: String) : Screen
+    data class Setup(val site: String) : Screen
 }
 
 class Hub(ctx: Context) {
@@ -45,6 +49,17 @@ class Hub(ctx: Context) {
     var newVersion by mutableStateOf<Long?>(null); private set
     var updating by mutableStateOf<Float?>(null); private set
     val version = Updater.current(ctx)
+    /** Les tâches longues vivent ici : changer d'écran ne les interrompt plus. */
+    val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    var site by mutableStateOf(prefs.getString("site", null)); private set
+    var syncProgress by mutableStateOf<Float?>(null)
+    val siteStatus = mutableStateMapOf<String, String>()
+    fun pickSite(s: String) { site = s; prefs.edit().putString("site", s).apply() }
+    fun account(s: String) = if (s == "AO3") user else users[s]
+    fun startSync(full: Boolean = false) { scope.launch { sync(full) } }
+    fun startUpdate() { scope.launch { doUpdate() } }
+    fun startImport(url: String) { scope.launch { importUrl(url) } }
+    fun startCheck(manual: Boolean = false) { scope.launch { checkUpdate(manual) } }
 
     fun saveSiteUser(site: String, u: String?) {
         val v = u?.trim()?.ifEmpty { null }
@@ -126,7 +141,7 @@ class Hub(ctx: Context) {
             while (url != null && n++ < max) {
                 val (list, next) = withContext(Dispatchers.IO) { Ao3.page(url!!, src) }
                 list.forEach { add(it) }; publish()
-                status = "$src… ${seen.size} fanfictions"
+                status = "AO3 · ${src.lowercase()} · ${seen.size} fanfictions"; syncProgress = null
                 if (!full && stop(list)) break
                 url = next
             }
@@ -160,21 +175,23 @@ class Hub(ctx: Context) {
                                 else -> withContext(Dispatchers.IO) { Ao3.work(id, "Abonnement") }
                             }
                             w?.let { add(it) }
-                            done++; status = "Abonnements $done/${todo.size}"
+                            done++; status = "AO3 · abonnements $done/${todo.size}"; syncProgress = done.toFloat() / todo.size
                             if (done % 8 == 0) publish()
                         }
                     }
                 }.awaitAll()
             }
             publish()
+            siteStatus["AO3"] = "${seen.values.count { it.site == "AO3" }} fanfictions synchronisées"
           }
             // 5. Autres sites : bibliothèque du compte puis fanfictions suivies non terminées.
             for (s in Sites.all) {
                 val su = users[s.name]
                 if (su != null) runCatching {
-                    status = "${s.name}…"
-                    s.library(su, old).forEach { add(it) }; publish()
-                }.onFailure { status = "${s.name} : ${it.message}" }
+                    status = "${s.name} · bibliothèque…"; syncProgress = null
+                    val l = s.library(su, old); l.forEach { add(it) }; publish()
+                    siteStatus[s.name] = "${l.size} fanfictions synchronisées"
+                }.onFailure { siteStatus[s.name] = "Erreur : ${it.message}" }
                 old.values.filter { it.site == s.name && it.id !in seen && (full || !it.complete) }.forEach { w ->
                     status = "${s.name} : ${w.title.take(30)}"
                     runCatching { s.info(w.link) }.getOrNull()?.let { add(it.copy(sources = w.sources)) }
@@ -187,7 +204,7 @@ class Hub(ctx: Context) {
         } catch (e: Exception) {
             publish()
             status = "Synchro interrompue : ${e.message ?: "réseau indisponible"}"
-        } finally { syncing = false }
+        } finally { syncing = false; syncProgress = null }
     }
 
     fun syncDue() = user != null && System.currentTimeMillis() - prefs.getLong("lastSync", 0) > 20 * 60_000

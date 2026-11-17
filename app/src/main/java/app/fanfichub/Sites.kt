@@ -32,18 +32,23 @@ object Web {
     private val lock = Mutex()
 
     @SuppressLint("SetJavaScriptEnabled")
-    suspend fun html(url: String): Document = lock.withLock {
+    suspend fun html(url: String): Document = Jsoup.parse(load(url, json = false), url)
+
+    /** Texte brut de la page (réponses JSON des API), via le vrai navigateur et sa session. */
+    suspend fun text(url: String): String = load(url, json = true)
+
+    private suspend fun load(url: String, json: Boolean): String = lock.withLock {
         val raw = withContext(Dispatchers.Main) {
             val w = wv ?: WebView(app).apply { settings.javaScriptEnabled = true; settings.domStorageEnabled = true }.also { wv = it }
             withTimeoutOrNull(60_000) {
                 suspendCancellableCoroutine<String> { cont ->
                     var tries = 0
                     fun grab() {
-                        w.evaluateJavascript("document.title+'\\u0001'+document.documentElement.outerHTML") { r ->
+                        w.evaluateJavascript(if (json) "document.title+'\\u0001'+document.body.innerText" else "document.title+'\\u0001'+document.documentElement.outerHTML") { r ->
                             val s = runCatching { JSONTokener(r).nextValue() as String }.getOrDefault("")
                             val title = s.substringBefore('\u0001')
                             val challenge = title.contains("Just a moment", true) || title.contains("Un instant", true) || title.contains("Attention Required", true)
-                            if ((challenge || s.length < 1500) && tries++ < 25) w.postDelayed({ if (cont.isActive) grab() }, 1500)
+                            if ((challenge || (!json && s.length < 1500)) && tries++ < 25) w.postDelayed({ if (cont.isActive) grab() }, 1500)
                             else if (cont.isActive) cont.resume(s)
                         }
                     }
@@ -58,7 +63,7 @@ object Web {
         val title = raw.substringBefore('\u0001')
         if (title.contains("Just a moment", true) || title.contains("Attention Required", true))
             error("Le site demande une vérification : ouvre-le une fois via « Ouvrir le site » dans l'onglet Compte")
-        Jsoup.parse(raw.substringAfter('\u0001'), url)
+        raw.substringAfter('\u0001')
     }
 }
 
@@ -103,9 +108,8 @@ object Wattpad : Site {
     private const val F = "id,title,user(name),description,tags,completed,numParts,voteCount,mature,lastPublishedPart(createDate)"
     override fun owns(url: String) = "wattpad.com" in url
 
-    private suspend fun json(u: String): String = withContext(Dispatchers.IO) {
-        Thread.sleep(300)
-        Jsoup.connect(u).ignoreContentType(true).userAgent(UA).cookies(cookiesFor(B)).timeout(30000).execute().body()
+    private suspend fun json(u: String): String = Web.text(u).trim().also {
+        if (!it.startsWith("{") && !it.startsWith("[")) error("Wattpad a renvoyé une page inattendue (connecte-toi via « Se connecter sur le site »)")
     }
 
     private fun work(o: JSONObject): Work {
@@ -134,7 +138,7 @@ object Wattpad : Site {
     private suspend fun text(pid: String): String {
         val sb = StringBuilder()
         for (page in 1..30) {
-            val h = json("$B/apiv2/storytext?id=$pid&page=$page")
+            val h = Web.html("$B/apiv2/storytext?id=$pid&page=$page").body().html()
             if (h.isBlank() || sb.contains(h)) break
             sb.append(h)
         }
@@ -142,9 +146,20 @@ object Wattpad : Site {
     }
 
     override suspend fun library(user: String, known: Map<String, Work>): List<Work> {
-        val o = JSONObject(json("$B/api/v3/users/${URLEncoder.encode(user, "UTF-8")}/library?limit=200&fields=stories($F)"))
-        val a = o.optJSONArray("stories") ?: JSONArray()
-        return (0 until a.length()).map { work(a.getJSONObject(it)) }
+        val u = URLEncoder.encode(user.trim().removePrefix("@"), "UTF-8")
+        val out = LinkedHashMap<String, Work>()
+        // Bibliothèque (nécessite d'être connecté), puis listes de lecture publiques.
+        runCatching {
+            val a = JSONObject(json("$B/api/v3/users/$u/library?limit=200&fields=stories($F)")).optJSONArray("stories") ?: JSONArray()
+            for (i in 0 until a.length()) work(a.getJSONObject(i)).let { out[it.id] = it }
+        }
+        val lists = runCatching { JSONObject(json("$B/api/v3/users/$u/lists?limit=50&fields=lists(name,stories($F))")).optJSONArray("lists") }.getOrNull()
+        if (lists != null) for (i in 0 until lists.length()) {
+            val st = lists.getJSONObject(i).optJSONArray("stories") ?: continue
+            for (j in 0 until st.length()) work(st.getJSONObject(j)).let { out.putIfAbsent(it.id, it) }
+        }
+        if (out.isEmpty()) error("aucune histoire trouvée pour « $user » (vérifie le pseudo et la connexion)")
+        return out.values.toList()
     }
 }
 

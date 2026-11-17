@@ -28,6 +28,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -81,6 +82,7 @@ fun HubApp(hub: Hub) {
                     is Screen.Login -> Login(hub, s.site)
                     is Screen.Detail -> Detail(hub, s.id)
                     is Screen.Reader -> Reader(hub, s.id)
+                    is Screen.Setup -> Setup(hub, s.site)
                 }
             }
         }
@@ -196,26 +198,114 @@ fun ContinueCard(w: Work, onClick: () -> Unit) {
     }
 }
 
+// ---------- Sites ----------
+data class SiteUi(val name: String, val logo: String, val color: Color, val desc: String, val how: String)
+
+val SITE_UI = listOf(
+    SiteUi("AO3", "AO3", Color(0xFFE5484D), "Favoris, à lire plus tard et abonnements", "Connecte-toi avec ton identifiant AO3 : le pseudo est détecté tout seul."),
+    SiteUi("Wattpad", "W", Color(0xFFFF7A1A), "Bibliothèque et listes de lecture", "Connecte-toi sur Wattpad, puis indique ton pseudo (celui de ton profil, sans @)."),
+    SiteUi("FanFiction.net", "FF", Color(0xFF3E7BFA), "Histoires favorites de ton profil", "Copie le lien de ton profil (fanfiction.net/u/123456…). La connexion n'est utile que si le site demande une vérification."),
+    SiteUi("Spirit Fanfics", "S", Color(0xFF22C3A6), "Ta bibliothèque Spirit", "Connecte-toi sur Spirit, puis indique ton pseudo."),
+)
+fun siteUi(name: String?) = SITE_UI.firstOrNull { it.name == name } ?: SITE_UI[0]
+
+@Composable
+fun SiteLogo(site: String, size: Int, modifier: Modifier = Modifier) {
+    val s = siteUi(site)
+    Box(modifier.size(size.dp).clip(RoundedCornerShape((size * 0.3f).dp)).background(Brush.linearGradient(listOf(s.color, s.color.copy(alpha = 0.6f)))),
+        contentAlignment = Alignment.Center) {
+        Text(s.logo, color = Color.White, fontWeight = FontWeight.Black, fontSize = (size * if (s.logo.length > 2) 0.3f else 0.42f).sp)
+    }
+}
+
+/** Premier lancement : choisir son site. */
+@Composable
+fun SitePicker(hub: Hub) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).statusBarsPadding().navigationBarsPadding().padding(22.dp)) {
+        Text("FANFIC HUB", style = TextStyle(brush = Grad, fontSize = 13.sp, fontWeight = FontWeight.Black, letterSpacing = 3.sp), modifier = Modifier.padding(top = 24.dp))
+        Text("Où lis-tu ?", color = Txt, fontSize = 38.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(top = 8.dp))
+        Text("Choisis un site pour commencer. Tu pourras passer de l'un à l'autre à tout moment.", color = Mut, fontSize = 15.sp, lineHeight = 22.sp,
+            modifier = Modifier.padding(top = 8.dp, bottom = 28.dp))
+        SITE_UI.forEach { s ->
+            Row(Modifier.padding(bottom = 12.dp).fillMaxWidth().clip(RoundedCornerShape(26.dp))
+                .background(Brush.linearGradient(listOf(s.color.copy(alpha = 0.28f), Surf, Surf))).border(1.dp, s.color.copy(alpha = 0.25f), RoundedCornerShape(26.dp))
+                .clickable { hub.pickSite(s.name); if (hub.account(s.name) == null) hub.push(Screen.Setup(s.name)) }.padding(18.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                SiteLogo(s.name, 54)
+                Column(Modifier.weight(1f).padding(start = 16.dp)) {
+                    Text(s.name, color = Txt, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+                    Text(s.desc, color = Mut, fontSize = 13.sp, lineHeight = 18.sp)
+                }
+                hub.account(s.name)?.let { Pill("Connecté", s.color) }
+            }
+        }
+        Text("Tout voir", color = A1, fontSize = 16.sp, fontWeight = FontWeight.Bold,
+            modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 8.dp).clip(CircleShape).clickable { hub.pickSite("ALL") }.padding(14.dp))
+    }
+}
+
+/** Sélecteur de site toujours visible en haut. */
+@Composable
+fun SiteChips(hub: Hub) {
+    LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 14.dp, bottom = 4.dp)) {
+        item {
+            val on = hub.site == "ALL"
+            Row(Modifier.clip(CircleShape).background(if (on) Grad else SolidColor(Surf2)).clickable { hub.pickSite("ALL") }.padding(horizontal = 16.dp, vertical = 10.dp)) {
+                Text("Tous · ${hub.works.size}", color = if (on) Color.White else Mut, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            }
+        }
+        items(SITE_UI, key = { it.name }) { s ->
+            val on = hub.site == s.name
+            val n = hub.works.count { it.site == s.name }
+            Row(Modifier.clip(CircleShape).background(if (on) s.color.copy(alpha = 0.95f) else Surf2).clickable { hub.pickSite(s.name) }
+                .padding(start = 6.dp, end = 16.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                SiteLogo(s.name, 28)
+                Text("${if (s.name == "FanFiction.net") "FF.net" else s.name.substringBefore(' ')} · $n", color = if (on) Color.White else Mut,
+                    fontWeight = FontWeight.SemiBold, fontSize = 14.sp, modifier = Modifier.padding(start = 8.dp))
+            }
+        }
+    }
+}
+
+fun Hub.visible() = works.filter { site == "ALL" || it.site == site }
+
+/** Bandeau de synchronisation, visible sur tous les onglets. */
+@Composable
+fun SyncPill(hub: Hub, modifier: Modifier) {
+    androidx.compose.animation.AnimatedVisibility(hub.syncing, modifier = modifier, enter = fadeIn() + androidx.compose.animation.slideInVertically { -it },
+        exit = fadeOut() + androidx.compose.animation.slideOutVertically { -it }) {
+        Column(Modifier.statusBarsPadding().padding(top = 8.dp, start = 20.dp, end = 20.dp).fillMaxWidth().clip(RoundedCornerShape(20.dp))
+            .background(Surf2.copy(alpha = 0.97f)).border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(20.dp)).padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                androidx.compose.material3.CircularProgressIndicator(Modifier.size(16.dp), color = A1, strokeWidth = 2.dp)
+                Text(hub.status ?: "Synchronisation…", color = Txt, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 10.dp))
+            }
+            hub.syncProgress?.let { Bar(it, A1, Modifier.padding(top = 10.dp)) }
+        }
+    }
+}
+
 // ---------- Accueil ----------
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun Home(hub: Hub) {
-    val scope = rememberCoroutineScope()
-    LaunchedEffect(Unit) { hub.checkUpdate(); if (hub.syncDue()) hub.sync() }
-    LaunchedEffect(hub.pendingImport) { hub.pendingImport?.let { hub.pendingImport = null; hub.importUrl(it) } }
+    LaunchedEffect(Unit) { hub.startCheck(); if (hub.syncDue()) hub.startSync() }
+    LaunchedEffect(hub.pendingImport) { hub.pendingImport?.let { hub.pendingImport = null; hub.startImport(it) } }
+    if (hub.site == null) { SitePicker(hub); return }
     Box(Modifier.fillMaxSize()) {
-        PullToRefreshBox(isRefreshing = hub.syncing, onRefresh = { scope.launch { hub.sync() } }, modifier = Modifier.fillMaxSize()) {
-            when (hub.tab) { 0 -> Feed(hub); 1 -> Library(hub); else -> Account(hub) }
+        PullToRefreshBox(isRefreshing = false, onRefresh = { hub.startSync() }, modifier = Modifier.fillMaxSize()) {
+            when (hub.tab) { 0 -> Feed(hub); 1 -> Library(hub); else -> Accounts(hub) }
         }
+        SyncPill(hub, Modifier.align(Alignment.TopCenter))
         BottomBar(hub, Modifier.align(Alignment.BottomCenter))
     }
 }
 
 @Composable
 fun BottomBar(hub: Hub, modifier: Modifier) {
-    val items = listOf(Icons.Default.Notifications to "Nouveautés", Icons.Default.Star to "Bibliothèque", Icons.Default.Person to "Compte")
+    val items = listOf(Icons.Default.Home to "Accueil", Icons.Default.Star to "Bibliothèque", Icons.Default.Person to "Comptes")
     val shape = RoundedCornerShape(30.dp)
-    Row(modifier.navigationBarsPadding().padding(bottom = 14.dp).clip(shape).background(Surf2.copy(alpha = 0.95f))
+    Row(modifier.navigationBarsPadding().padding(bottom = 14.dp).clip(shape).background(Surf2.copy(alpha = 0.96f))
         .border(1.dp, Color.White.copy(alpha = 0.08f), shape).padding(6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         items.forEachIndexed { i, (ic, label) ->
             val on = hub.tab == i
@@ -229,46 +319,55 @@ fun BottomBar(hub: Hub, modifier: Modifier) {
 }
 
 @Composable
-fun Header(hub: Hub, title: String? = null) {
-    val h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
-    Column(Modifier.statusBarsPadding().padding(start = 22.dp, end = 22.dp, top = 28.dp, bottom = 4.dp)) {
-        Text("FANFIC HUB", style = TextStyle(brush = Grad, fontSize = 13.sp, fontWeight = FontWeight.Black, letterSpacing = 3.sp))
-        Text(title ?: ((if (h in 5..17) "Bonjour" else "Bonsoir") + (hub.user?.let { ",\n$it" } ?: "")),
-            color = Txt, fontSize = 34.sp, fontWeight = FontWeight.Bold, lineHeight = 40.sp, modifier = Modifier.padding(top = 6.dp))
-        hub.status?.let { Text(it, color = Mut, fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp)) }
-    }
-}
-
-@Composable
-fun ConnectCard(hub: Hub) {
-    Column(Modifier.padding(20.dp).fillMaxWidth().clip(RoundedCornerShape(26.dp)).background(Brush.linearGradient(listOf(A1.copy(alpha = 0.35f), A2.copy(alpha = 0.2f), Surf)))
-        .padding(22.dp)) {
-        Text("Connecte ton compte AO3", color = Txt, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-        Text("Tes favoris, ta liste « à lire » et tes abonnements arrivent ici, avec une alerte à chaque nouveau chapitre.",
-            color = Color(0xFFCFCFDA), fontSize = 14.sp, lineHeight = 20.sp, modifier = Modifier.padding(top = 6.dp, bottom = 16.dp))
-        GradButton("Se connecter") { hub.push(Screen.Login("AO3")) }
+fun Title(small: String, big: String) {
+    Column(Modifier.statusBarsPadding().padding(start = 22.dp, end = 22.dp, top = 26.dp)) {
+        Text(small, style = TextStyle(brush = Grad, fontSize = 13.sp, fontWeight = FontWeight.Black, letterSpacing = 3.sp))
+        Text(big, color = Txt, fontSize = 34.sp, fontWeight = FontWeight.Bold, lineHeight = 40.sp, modifier = Modifier.padding(top = 6.dp))
     }
 }
 
 @Composable
 fun UpdateCard(hub: Hub) {
-    val scope = rememberCoroutineScope()
     Column(Modifier.padding(20.dp).fillMaxWidth().clip(RoundedCornerShape(26.dp)).background(Brush.linearGradient(listOf(A2.copy(alpha = 0.35f), A1.copy(alpha = 0.25f), Surf))).padding(22.dp)) {
         Text("Nouvelle version disponible", color = Txt, fontSize = 20.sp, fontWeight = FontWeight.Bold)
         Text("Version ${hub.newVersion} · tu as la ${hub.version}", color = Color(0xFFCFCFDA), fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp, bottom = 14.dp))
         hub.updating?.let { Bar(it, Color.White, Modifier.padding(bottom = 12.dp)) }
-        GradButton(hub.updating?.let { "Téléchargement… ${(it * 100).toInt()} %" } ?: "Mettre à jour") { scope.launch { hub.doUpdate() } }
+        GradButton(hub.updating?.let { "Téléchargement… ${(it * 100).toInt()} %" } ?: "Mettre à jour") { hub.startUpdate() }
+    }
+}
+
+/** Carte d'état du site sélectionné : clair sur ce qu'il faut faire. */
+@Composable
+fun SiteStateCard(hub: Hub) {
+    val name = hub.site ?: return
+    if (name == "ALL") return
+    val s = siteUi(name)
+    val acc = hub.account(name)
+    Row(Modifier.padding(horizontal = 20.dp, vertical = 10.dp).fillMaxWidth().clip(RoundedCornerShape(22.dp))
+        .background(Brush.linearGradient(listOf(s.color.copy(alpha = 0.22f), Surf))).clickable { hub.push(Screen.Setup(name)) }.padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        SiteLogo(name, 40)
+        Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
+            Text(if (acc == null) "Connecte ton compte ${s.name}" else acc, color = Txt, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text(hub.siteStatus[name] ?: if (acc == null) "Appuie ici, c'est rapide" else "Tire vers le bas pour synchroniser", color = Mut, fontSize = 13.sp,
+                maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Mut)
     }
 }
 
 @Composable
 fun Feed(hub: Hub) {
-    val fresh = hub.works.filter { it.newChapters > 0 }.sortedByDescending { it.newChapters }
-    val reading = hub.works.filter { it.progress > 0.01f && it.progress < 0.985f }.sortedByDescending { it.lastRead }
+    val list = hub.visible()
+    val fresh = list.filter { it.newChapters > 0 }.sortedByDescending { it.newChapters }
+    val reading = list.filter { it.progress > 0.01f && it.progress < 0.985f }.sortedByDescending { it.lastRead }
+    val h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 120.dp)) {
-        item { Header(hub) }
+        item { Title("FANFIC HUB", (if (h in 5..17) "Bonjour" else "Bonsoir") + (hub.user?.let { ", $it" } ?: "")) }
+        item { SiteChips(hub) }
         if (hub.newVersion != null) item { UpdateCard(hub) }
-        if (hub.user == null && hub.users.isEmpty()) item { ConnectCard(hub) }
+        item { SiteStateCard(hub) }
+        if (!hub.syncing && hub.status != null) item { Text(hub.status!!, color = Mut, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 22.dp, vertical = 4.dp)) }
         if (reading.isNotEmpty()) {
             item { Section("Reprendre la lecture") }
             item {
@@ -279,7 +378,7 @@ fun Feed(hub: Hub) {
         }
         item { Section(if (fresh.isEmpty()) "Nouveaux chapitres" else "Nouveaux chapitres · ${fresh.size}") }
         if (fresh.isEmpty()) item {
-            Empty(if (hub.works.isEmpty()) "Tire l'écran vers le bas pour synchroniser ta bibliothèque." else "Tout est à jour. Tire vers le bas pour vérifier.")
+            Empty(if (list.isEmpty()) "Rien ici pour l'instant. Tire l'écran vers le bas pour synchroniser." else "Tout est à jour ✓")
         }
         items(fresh, key = { it.id }) { w ->
             WorkCard(w, Modifier.padding(horizontal = 20.dp, vertical = 7.dp).animateItem()) { hub.push(Screen.Detail(w.id)) }
@@ -307,25 +406,21 @@ fun Library(hub: Hub) {
     var f by remember { mutableIntStateOf(0) }
     var adding by remember { mutableStateOf(false) }
     var link by remember { mutableStateOf("") }
-    val scope = rememberCoroutineScope()
-    val sites = listOf("AO3") + Sites.all.map { it.name }
-    val filters = listOf("Tout", "En cours de lecture", "Nouveautés", "Abonnement", "Favori", "À lire", "Terminées", "Hors ligne") + sites
-    val list = hub.works.filter { w ->
+    val filters = listOf("Tout", "En cours", "Nouveautés", "Terminées", "Hors ligne")
+    val list = hub.visible().filter { w ->
         (q.isBlank() || listOf(w.title, w.author, w.fandoms.joinToString(), w.tags.joinToString()).any { it.contains(q, true) }) && when (f) {
             1 -> w.progress > 0.01f && w.progress < 0.985f
             2 -> w.newChapters > 0
-            3, 4, 5 -> filters[f] in w.sources
-            6 -> w.complete
-            7 -> hub.hasText(w.id)
-            in 8..20 -> w.site == filters[f]
+            3 -> w.complete
+            4 -> hub.hasText(w.id)
             else -> true
         }
     }.sortedWith(compareByDescending<Work> { it.newChapters > 0 }.thenByDescending { it.lastRead }.thenBy { it.title.lowercase() })
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 120.dp)) {
-        item { Header(hub, "Bibliothèque") }
+        item { Title("BIBLIOTHÈQUE", "${list.size} fanfiction" + if (list.size > 1) "s" else "") }
+        item { SiteChips(hub) }
         item {
-            Row(Modifier.padding(start = 22.dp, end = 20.dp, bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("${hub.works.size} fanfictions", color = Mut, fontSize = 14.sp, modifier = Modifier.weight(1f))
+            Row(Modifier.padding(start = 20.dp, end = 20.dp, top = 10.dp, bottom = 12.dp)) {
                 FilterPill(if (adding) "Fermer" else "+ Ajouter par lien", adding) { adding = !adding }
             }
         }
@@ -333,7 +428,7 @@ fun Library(hub: Hub) {
             Column(Modifier.padding(bottom = 14.dp)) {
                 SearchBox(link, "Colle le lien d'une fanfiction") { link = it }
                 Text("AO3, Wattpad, FanFiction.net ou Spirit. Astuce : dans Chrome, Partager → Fanfic Hub.", color = Mut, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 22.dp, vertical = 8.dp))
-                Box(Modifier.padding(horizontal = 20.dp)) { GradButton("Ajouter") { if (link.isNotBlank()) { val l = link; link = ""; adding = false; scope.launch { hub.importUrl(l) } } } }
+                Box(Modifier.padding(horizontal = 20.dp)) { GradButton("Ajouter") { if (link.isNotBlank()) { val l = link; link = ""; adding = false; hub.startImport(l) } } }
             }
         }
         item { SearchBox(q) { q = it } }
@@ -349,43 +444,36 @@ fun Library(hub: Hub) {
     }
 }
 
-// ---------- Compte ----------
+// ---------- Comptes ----------
 @Composable
-fun Account(hub: Hub) {
-    val scope = rememberCoroutineScope()
-    var manual by remember { mutableStateOf("") }
+fun Accounts(hub: Hub) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 120.dp)) {
-        Header(hub, "Compte")
-        Column(Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
-            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Surf).padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(56.dp).clip(CircleShape).background(Grad), contentAlignment = Alignment.Center) {
-                    Text(hub.user?.take(1)?.uppercase() ?: "?", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-                }
-                Column(Modifier.padding(start = 16.dp)) {
-                    Text(hub.user ?: "Non connecté", color = Txt, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                    Text("Archive of Our Own", color = Mut, fontSize = 13.sp)
+        Title("COMPTES", "Tes sites")
+        Column(Modifier.padding(horizontal = 20.dp, vertical = 18.dp)) {
+            SITE_UI.forEach { s ->
+                val acc = hub.account(s.name)
+                Row(Modifier.padding(bottom = 12.dp).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Surf)
+                    .border(1.dp, if (acc != null) s.color.copy(alpha = 0.35f) else Color.Transparent, RoundedCornerShape(24.dp))
+                    .clickable { hub.push(Screen.Setup(s.name)) }.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    SiteLogo(s.name, 48)
+                    Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
+                        Text(s.name, color = Txt, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                        Text(acc?.let { "Connecté · $it" } ?: "Non connecté", color = if (acc != null) s.color else Mut, fontSize = 13.sp)
+                        hub.siteStatus[s.name]?.let { Text(it, color = if (it.startsWith("Erreur")) Color(0xFFF87171) else Mut, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                    }
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Mut)
                 }
             }
-            Spacer(Modifier.height(16.dp))
-            if (hub.user == null) {
-                GradButton("Se connecter à AO3") { hub.push(Screen.Login("AO3")) }
-                Text("Ou entre seulement ton pseudo (favoris publics, sans abonnements) :", color = Mut, fontSize = 13.sp, modifier = Modifier.padding(top = 18.dp, bottom = 8.dp))
-                SearchBox(manual) { manual = it }
-                Spacer(Modifier.height(10.dp))
-                GhostButton("Valider le pseudo") { if (manual.isNotBlank()) { hub.saveUser(manual); scope.launch { hub.sync() } } }
-            } else {
-                GradButton(if (hub.syncing) "Synchronisation…" else "Synchroniser maintenant") { scope.launch { hub.sync() } }
-                Spacer(Modifier.height(10.dp))
-                GhostButton("Synchronisation complète") { scope.launch { hub.sync(full = true) } }
-                Text("Relit tout et retire les fanfictions que tu as enlevées de tes favoris.", color = Mut, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp, bottom = 10.dp))
-                GhostButton("Se déconnecter") { hub.logout() }
-            }
+            Box(Modifier.padding(top = 6.dp)) { GradButton(if (hub.syncing) "Synchronisation en cours…" else "Tout synchroniser") { hub.startSync() } }
+            Spacer(Modifier.height(10.dp))
+            GhostButton("Synchronisation complète") { hub.startSync(full = true) }
+            Text("La complète relit tout et retire ce que tu as enlevé de tes favoris.", color = Mut, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+
             Text("Lecture", color = Txt, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 30.dp, bottom = 12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 THEMES.forEachIndexed { i, (name, bg, fg) ->
-                    val on = hub.theme == i
                     Column(Modifier.weight(1f).clip(RoundedCornerShape(18.dp)).background(Color(bg))
-                        .border(2.dp, if (on) A1 else Color.Transparent, RoundedCornerShape(18.dp)).clickable { hub.setReader(t = i) }.padding(vertical = 16.dp),
+                        .border(2.dp, if (hub.theme == i) A1 else Color.Transparent, RoundedCornerShape(18.dp)).clickable { hub.setReader(t = i) }.padding(vertical = 16.dp),
                         horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("Aa", color = Color(fg), fontSize = 22.sp, fontWeight = FontWeight.Bold)
                         Text(name, color = Color(fg).copy(alpha = 0.7f), fontSize = 12.sp)
@@ -397,36 +485,65 @@ fun Account(hub: Hub) {
                 Text("Taille du texte : ${hub.size}", color = Mut, fontSize = 14.sp, modifier = Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                 Text("A+", color = Txt, fontSize = 22.sp, modifier = Modifier.clip(CircleShape).clickable { hub.setReader(s = hub.size + 1) }.padding(14.dp))
             }
-            Text("Autres sites", color = Txt, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 30.dp, bottom = 4.dp))
-            Text("Ou partage n'importe quelle fanfiction depuis Chrome vers Fanfic Hub.", color = Mut, fontSize = 13.sp, modifier = Modifier.padding(bottom = 12.dp))
-            Sites.all.forEach { s -> SiteCard(hub, s) }
+
             Text("Application", color = Txt, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 30.dp, bottom = 12.dp))
             Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Surf).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Version ${hub.version}", color = Txt, fontSize = 15.sp, modifier = Modifier.weight(1f))
-                if (hub.newVersion != null) FilterPill(hub.updating?.let { "${(it * 100).toInt()} %" } ?: "Mettre à jour", true) { scope.launch { hub.doUpdate() } }
-                else FilterPill("Vérifier", false) { scope.launch { hub.checkUpdate(manual = true) } }
+                if (hub.newVersion != null) FilterPill(hub.updating?.let { "${(it * 100).toInt()} %" } ?: "Mettre à jour", true) { hub.startUpdate() }
+                else FilterPill("Vérifier", false) { hub.startCheck(manual = true) }
             }
         }
     }
 }
 
+/** Configuration d'un site en 3 étapes numérotées. */
 @Composable
-fun SiteCard(hub: Hub, s: Site) {
-    val user = hub.users[s.name]
-    var v by remember(user) { mutableStateOf(user ?: "") }
-    Column(Modifier.padding(bottom = 10.dp).fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(Surf).padding(vertical = 16.dp)) {
-        Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(10.dp).clip(CircleShape).background(fandomColor(s.name)))
-            Text(s.name, color = Txt, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f).padding(start = 12.dp))
-            Pill(user ?: "Non configuré", if (user != null) A1 else Mut)
+fun Setup(hub: Hub, name: String) {
+    val s = siteUi(name)
+    val acc = hub.account(name)
+    var v by remember(acc) { mutableStateOf(acc ?: "") }
+    @Composable
+    fun Step(n: Int, title: String, body: String, content: @Composable () -> Unit) {
+        Row(Modifier.padding(bottom = 14.dp).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Surf).padding(18.dp)) {
+            Box(Modifier.size(32.dp).clip(CircleShape).background(s.color), contentAlignment = Alignment.Center) {
+                Text("$n", color = Color.White, fontWeight = FontWeight.Bold)
+            }
+            Column(Modifier.padding(start = 14.dp)) {
+                Text(title, color = Txt, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                Text(body, color = Mut, fontSize = 13.sp, lineHeight = 19.sp, modifier = Modifier.padding(top = 4.dp, bottom = 12.dp))
+                content()
+            }
         }
-        Spacer(Modifier.height(12.dp))
-        SearchBox(v, s.userHint) { v = it }
-        Row(Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterPill("Ouvrir le site", false) { hub.push(Screen.Login(s.name)) }
-            FilterPill(if (user == null) "Enregistrer" else "Mettre à jour", true) { hub.saveSiteUser(s.name, v) }
-            if (user != null) FilterPill("Retirer", false) { hub.saveSiteUser(s.name, null) }
+    }
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+            Box(Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(s.color.copy(alpha = 0.55f), s.color.copy(alpha = 0.1f), Bg)))) {
+                Column(Modifier.statusBarsPadding().padding(start = 22.dp, end = 22.dp, top = 76.dp, bottom = 18.dp)) {
+                    SiteLogo(name, 64)
+                    Text(s.name, color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(top = 14.dp))
+                    Text(acc?.let { "Connecté · $it" } ?: s.desc, color = Color.White.copy(alpha = 0.8f), fontSize = 15.sp, modifier = Modifier.padding(top = 4.dp))
+                    hub.siteStatus[name]?.let { Text(it, color = if (it.startsWith("Erreur")) Color(0xFFFCA5A5) else Color.White.copy(alpha = 0.7f), fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp)) }
+                }
+            }
+            Column(Modifier.padding(20.dp).navigationBarsPadding()) {
+                Text(s.how, color = Color(0xFFCFCFDA), fontSize = 14.sp, lineHeight = 21.sp, modifier = Modifier.padding(bottom = 18.dp))
+                Step(1, "Se connecter sur le site", "Une page du vrai site s'ouvre. Connecte-toi avec ton e-mail et ton mot de passe (le bouton Google ne marche pas ici).") {
+                    FilterPill("Ouvrir ${s.name}", true) { hub.push(Screen.Login(name)) }
+                }
+                if (name != "AO3") Step(2, if (name == "FanFiction.net") "Ton profil" else "Ton pseudo", if (name == "FanFiction.net") "Colle le lien de ton profil." else "Exactement comme sur ton profil.") {
+                    Box(Modifier.offset(x = (-20).dp)) { SearchBox(v, if (name == "FanFiction.net") "fanfiction.net/u/…" else "Pseudo") { v = it } }
+                    Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterPill("Enregistrer", true) { hub.saveSiteUser(name, v) }
+                        if (acc != null) FilterPill("Retirer", false) { hub.saveSiteUser(name, null) }
+                    }
+                }
+                Step(if (name == "AO3") 2 else 3, "Synchroniser", "Récupère tes fanfictions. Tu peux changer de page pendant ce temps.") {
+                    FilterPill(if (hub.syncing) "En cours…" else "Synchroniser", true) { hub.pickSite(name); hub.startSync(); hub.pop(); hub.tab = 0 }
+                }
+                if (name == "AO3" && acc != null) GhostButton("Se déconnecter d'AO3") { hub.logout() }
+            }
         }
+        CircleIcon(Icons.AutoMirrored.Filled.ArrowBack, Modifier.statusBarsPadding().padding(14.dp)) { hub.pop() }
     }
 }
 
@@ -440,7 +557,7 @@ fun Login(hub: Hub, site: String) {
         done = true
         CookieManager.getInstance().flush()
         if (site != "AO3") { hub.pop(); return }
-        scope.launch { if (name != null) hub.saveUser(name) else hub.detectUser(); hub.pop(); hub.tab = 0; hub.sync() }
+        hub.scope.launch { if (name != null) hub.saveUser(name) else hub.detectUser(); hub.pop(); hub.pop(); hub.pickSite("AO3"); hub.tab = 0; hub.startSync() }
     }
     Column(Modifier.fillMaxSize().background(Bg)) {
         Row(Modifier.statusBarsPadding().padding(12.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -472,6 +589,7 @@ fun Login(hub: Hub, site: String) {
 fun Detail(hub: Hub, id: String) {
     val w = hub.work(id) ?: return
     val c = fandomColor(w.fandom)
+    val sc = siteUi(w.site).color
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
@@ -481,6 +599,7 @@ fun Detail(hub: Hub, id: String) {
             item {
                 Box(Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(c.copy(alpha = 0.6f), c.copy(alpha = 0.15f), Bg)))) {
                     Column(Modifier.statusBarsPadding().padding(start = 22.dp, end = 22.dp, top = 76.dp, bottom = 10.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 12.dp)) { SiteLogo(w.site, 26); Text(w.site, color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 8.dp)) }
                         Text(w.fandoms.joinToString(" · ").uppercase(), color = Color.White.copy(alpha = 0.85f), fontSize = 12.sp, fontWeight = FontWeight.Bold,
                             letterSpacing = 1.5.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         Text(w.title, color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, lineHeight = 37.sp, modifier = Modifier.padding(top = 10.dp))
@@ -510,7 +629,7 @@ fun Detail(hub: Hub, id: String) {
                     }) {
                         if (busy) return@GradButton
                         if (hub.hasText(id) && w.newChapters == 0) hub.push(Screen.Reader(id))
-                        else scope.launch {
+                        else hub.scope.launch {
                             busy = true; err = null
                             try { hub.download(id); hub.push(Screen.Reader(id)) } catch (e: Exception) { err = e.message ?: "Erreur réseau" }
                             busy = false
