@@ -19,7 +19,11 @@ android {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
-    packaging { jniLibs { useLegacyPackaging = true } }
+    packaging {
+        jniLibs { useLegacyPackaging = true }
+        resources { excludes += setOf("META-INF/*.version", "META-INF/**/*.kotlin_module", "META-INF/*.kotlin_builtins", "kotlin/**", "DebugProbesKt.bin", "META-INF/LICENSE*", "META-INF/NOTICE*", "**/*.properties") }
+    }
+    dependenciesInfo { includeInApk = false; includeInBundle = false }
     buildFeatures { compose = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
@@ -34,6 +38,4 @@ dependencies {
     implementation("org.jsoup:jsoup:1.18.3")
     implementation("androidx.work:work-runtime-ktx:2.10.1")
     implementation("androidx.webkit:webkit:1.12.1")
-    implementation("com.google.mlkit:translate:17.0.3")
-    implementation("com.google.mlkit:language-id:17.0.6")
 }
