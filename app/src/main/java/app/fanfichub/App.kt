@@ -141,7 +141,7 @@ class Hub(ctx: Context) {
         if (!more) { results.clear(); listHits.clear(); openedList = null; searchPage = 1 } else searchPage++
         if (q.site == "Wattpad" && q.wpLists) {
             // Tout Wattpad : plusieurs robots en parallèle cherchent les listes qui contiennent des histoires avec ce tag
-            searching = true; searchErr = null; searchMore = false; listTag = q.text.trim(); searchInfo = "32 robots : recherche des histoires " + Wattpad.splitTags(listTag).joinToString(" + ") { "#$it" } + "…"
+            searching = true; searchErr = null; searchMore = false; listTag = q.text.trim(); searchInfo = "100 robots : recherche des histoires " + Wattpad.splitTags(listTag).joinToString(" + ") { "#$it" } + "…"
             searchJob = scope.launch {
                 agg.clear(); aggDirty = false
                 val ticker = launch { while (true) { kotlinx.coroutines.delay(350); if (aggDirty) { aggDirty = false; rebuildAgg() } } }

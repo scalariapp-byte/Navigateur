@@ -131,12 +131,15 @@ object Wattpad : Site {
 
     private suspend fun json(u: String, lane: String = "sync"): String {
         if (!slow) {
-            val direct = withContext(Dispatchers.IO) {
-                runCatching {
-                    val r = Jsoup.connect(u).ignoreContentType(true).ignoreHttpErrors(true).userAgent(BROWSER_UA).header("Accept", "application/json")
-                        .cookies(cookiesFor(B)).timeout(20000).execute()
-                    r.body().trim().takeIf { r.statusCode() == 200 }
-                }.getOrNull()
+            // Si Wattpad freine (429/503), le robot attend puis réessaie au lieu d'abandonner
+            var direct: String? = null
+            for (attempt in 0..3) {
+                val r = withContext(Dispatchers.IO) {
+                    runCatching { Jsoup.connect(u).ignoreContentType(true).ignoreHttpErrors(true).userAgent(BROWSER_UA).header("Accept", "application/json")
+                        .cookies(cookiesFor(B)).timeout(20000).execute() }.getOrNull()
+                }
+                if (r != null && (r.statusCode() == 429 || r.statusCode() == 503)) { kotlinx.coroutines.delay(800L shl attempt); continue }
+                direct = r?.body()?.trim()?.takeIf { r.statusCode() == 200 }; break
             }
             val isError = direct != null && Regex("^\\{\\s*\"(error|error_type|code|message)\"").containsMatchIn(direct)
             if (direct != null && !isError && (direct.startsWith("{") || direct.startsWith("["))) return direct
@@ -154,7 +157,7 @@ object Wattpad : Site {
         val id = o.get("id").toString()
         return Work("wp:$id", o.optString("title"), o.optJSONObject("user")?.optString("name") ?: "", listOf(tags.firstOrNull() ?: "Wattpad"),
             if (o.optBoolean("mature")) "Mature" else "", 0, "$n/${if (done) n else "?"}", o.optInt("voteCount"), o.optString("description").take(700),
-            tags.take(14), o.optJSONObject("lastPublishedPart")?.optString("createDate")?.take(10) ?: "", done, setOf("Favori"),
+            tags.take(40), o.optJSONObject("lastPublishedPart")?.optString("createDate")?.take(10) ?: "", done, setOf("Favori"),
             site = name, url = "$B/story/$id", cover = o.optString("cover"), checked = System.currentTimeMillis())
     }
 
@@ -260,7 +263,7 @@ object Wattpad : Site {
     suspend fun scanLists(query: String, onProgress: (String) -> Unit, onHit: (ListHit) -> Unit, onStory: (Work, Int) -> Unit = { _, _ -> }) = coroutineScope {
         val tags = splitTags(query)
         if (tags.isEmpty()) error("tag vide")
-        val bots = Semaphore(32)
+        val bots = Semaphore(100)
         fun matched(w: Work) = tags.count { t -> tagged(w.tags, w.title, t) }
         // Recherche Wattpad : « #tag » cible les tags ; plusieurs « #a #b » = histoires portant tous les tags (crossovers).
         val combo = if (tags.size > 1) listOf(tags.joinToString(" ") { "#$it" } to 10, tags.joinToString(" ") to 6) else emptyList()
@@ -380,7 +383,16 @@ object Wattpad : Site {
     }
     suspend fun userLists(user: String) = lists(enc(user))
     suspend fun createList(name: String): String? = post("$B/api/v3/lists", mapOf("name" to name))?.let { runCatching { JSONObject(it).get("id").toString() }.getOrNull() }
-    suspend fun addToList(listId: String, storyId: String): Boolean = post("$B/api/v3/lists/$listId/stories", mapOf("stories" to storyId)) != null
+    private suspend fun listHas(listId: String, storyId: String): Boolean = runCatching {
+        val a = JSONObject(json("$B/api/v3/lists/$listId/stories?limit=500&fields=stories(id)", "ui")).optJSONArray("stories") ?: JSONArray()
+        (0 until a.length()).any { a.getJSONObject(it).get("id").toString() == storyId }
+    }.getOrDefault(false)
+    /** Vérifie avant (déjà présente ?) et après (vraiment ajoutée ?). Renvoie vrai seulement si l'histoire est dans la liste. */
+    suspend fun addToList(listId: String, storyId: String): Boolean {
+        if (listHas(listId, storyId)) return true
+        post("$B/api/v3/lists/$listId/stories", mapOf("stories" to storyId)) ?: return false
+        return listHas(listId, storyId)
+    }
 
     private fun acc(o: JSONObject) = Account(o.optString("username"), o.optString("name"), "@" + o.optString("username"), o.optString("avatar"),
         listOfNotNull(o.optInt("numLists", -1).takeIf { it >= 0 }?.let { "$it listes" }, o.optInt("numFollowers", -1).takeIf { it >= 0 }?.let { "$it abonnés" },
