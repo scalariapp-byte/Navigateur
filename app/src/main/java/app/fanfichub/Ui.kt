@@ -379,7 +379,7 @@ fun Feed(hub: Hub) {
             item { Section("Reprendre la lecture") }
             item {
                 LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    items(reading, key = { it.id }) { w -> BookCover(w, 100, Modifier.clickable { hub.push(Screen.Reader(w.id)) }) }
+                    items(reading, key = { it.id }) { w -> Book3D(w, 100, Modifier.clickable { hub.push(Screen.Reader(w.id)) }) }
                 }
             }
         }

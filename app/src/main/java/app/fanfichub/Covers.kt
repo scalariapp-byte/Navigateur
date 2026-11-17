@@ -110,7 +110,7 @@ fun BookShelf(title: String, works: List<Work>, onAll: () -> Unit, onBook: (Work
                 modifier = Modifier.clip(CircleShape).clickable(onClick = onAll).padding(horizontal = 10.dp, vertical = 6.dp))
         }
         LazyRow(contentPadding = PaddingValues(horizontal = 22.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Bottom) {
-            items(works.take(30), key = { it.id }) { w -> BookCover(w, 92, Modifier.clickable { onBook(w) }) }
+            items(works.take(30), key = { it.id }) { w -> Book3D(w, 92, Modifier.clickable { onBook(w) }) }
         }
         Box(Modifier.padding(horizontal = 12.dp)) { WoodPlank() }
     }
@@ -119,4 +119,26 @@ fun BookShelf(title: String, works: List<Work>, onAll: () -> Unit, onBook: (Work
 fun collectionName(src: String) = when (src) {
     "Favori" -> "Favoris"; "À lire" -> "À lire plus tard"; "Abonnement" -> "Abonnements"; "Ajouté" -> "Ajoutées par lien"
     else -> src.removePrefix("Liste : ")
+}
+
+/** Livre en 3D debout : couverture devant, tranche des pages dessus et sur le côté. */
+@Composable
+fun Book3D(w: Work, width: Int, modifier: Modifier = Modifier) {
+    val d = 9
+    val h = (width * 1.5f).toInt()
+    Box(modifier.size((width + d).dp, (h + d).dp)) {
+        androidx.compose.foundation.Canvas(Modifier.matchParentSize()) {
+            val D = d.dp.toPx(); val W = width.dp.toPx(); val H = size.height
+            val top = androidx.compose.ui.graphics.Path().apply { moveTo(0f, D); lineTo(D, 0f); lineTo(W + D, 0f); lineTo(W, D); close() }
+            drawPath(top, Color(0xFFF3EBDD))
+            val side = androidx.compose.ui.graphics.Path().apply { moveTo(W, D); lineTo(W + D, 0f); lineTo(W + D, H - D); lineTo(W, H); close() }
+            drawPath(side, Brush.horizontalGradient(listOf(Color(0xFFE6DBC8), Color(0xFFB9AC96)), startX = W, endX = W + D))
+            for (i in 1..5) {
+                val t = i / 6f
+                drawLine(Color(0x22000000), androidx.compose.ui.geometry.Offset(W + D * t, D - D * t), androidx.compose.ui.geometry.Offset(W + D * t, H - D * t), 1f)
+                drawLine(Color(0x22000000), androidx.compose.ui.geometry.Offset(W * t, D), androidx.compose.ui.geometry.Offset(W * t + D, 0f), 1f)
+            }
+        }
+        BookCover(w, width, Modifier.offset(y = d.dp))
+    }
 }
