@@ -78,7 +78,7 @@ fun HubApp(hub: Hub) {
             ) { s ->
                 when (s) {
                     Screen.Home -> Home(hub)
-                    Screen.Login -> Login(hub)
+                    is Screen.Login -> Login(hub, s.site)
                     is Screen.Detail -> Detail(hub, s.id)
                     is Screen.Reader -> Reader(hub, s.id)
                 }
@@ -172,6 +172,7 @@ fun WorkCard(w: Work, modifier: Modifier = Modifier, onClick: () -> Unit) {
         Row(Modifier.padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("${fmt(w.words)} mots", color = Mut, fontSize = 13.sp)
             Text("${w.chapters} ch.", color = Mut, fontSize = 13.sp)
+            if (w.site != "AO3") Text(w.site, color = fandomColor(w.site), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.Favorite, null, tint = A2, modifier = Modifier.size(14.dp))
                 Text(" ${fmt(w.kudos)}", color = Mut, fontSize = 13.sp)
@@ -200,7 +201,8 @@ fun ContinueCard(w: Work, onClick: () -> Unit) {
 @Composable
 fun Home(hub: Hub) {
     val scope = rememberCoroutineScope()
-    LaunchedEffect(Unit) { if (hub.syncDue()) hub.sync() }
+    LaunchedEffect(Unit) { hub.checkUpdate(); if (hub.syncDue()) hub.sync() }
+    LaunchedEffect(hub.pendingImport) { hub.pendingImport?.let { hub.pendingImport = null; hub.importUrl(it) } }
     Box(Modifier.fillMaxSize()) {
         PullToRefreshBox(isRefreshing = hub.syncing, onRefresh = { scope.launch { hub.sync() } }, modifier = Modifier.fillMaxSize()) {
             when (hub.tab) { 0 -> Feed(hub); 1 -> Library(hub); else -> Account(hub) }
@@ -244,7 +246,18 @@ fun ConnectCard(hub: Hub) {
         Text("Connecte ton compte AO3", color = Txt, fontSize = 20.sp, fontWeight = FontWeight.Bold)
         Text("Tes favoris, ta liste « à lire » et tes abonnements arrivent ici, avec une alerte à chaque nouveau chapitre.",
             color = Color(0xFFCFCFDA), fontSize = 14.sp, lineHeight = 20.sp, modifier = Modifier.padding(top = 6.dp, bottom = 16.dp))
-        GradButton("Se connecter") { hub.push(Screen.Login) }
+        GradButton("Se connecter") { hub.push(Screen.Login("AO3")) }
+    }
+}
+
+@Composable
+fun UpdateCard(hub: Hub) {
+    val scope = rememberCoroutineScope()
+    Column(Modifier.padding(20.dp).fillMaxWidth().clip(RoundedCornerShape(26.dp)).background(Brush.linearGradient(listOf(A2.copy(alpha = 0.35f), A1.copy(alpha = 0.25f), Surf))).padding(22.dp)) {
+        Text("Nouvelle version disponible", color = Txt, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Text("Version ${hub.newVersion} · tu as la ${hub.version}", color = Color(0xFFCFCFDA), fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp, bottom = 14.dp))
+        hub.updating?.let { Bar(it, Color.White, Modifier.padding(bottom = 12.dp)) }
+        GradButton(hub.updating?.let { "Téléchargement… ${(it * 100).toInt()} %" } ?: "Mettre à jour") { scope.launch { hub.doUpdate() } }
     }
 }
 
@@ -254,7 +267,8 @@ fun Feed(hub: Hub) {
     val reading = hub.works.filter { it.progress > 0.01f && it.progress < 0.985f }.sortedByDescending { it.lastRead }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 120.dp)) {
         item { Header(hub) }
-        if (hub.user == null) item { ConnectCard(hub) }
+        if (hub.newVersion != null) item { UpdateCard(hub) }
+        if (hub.user == null && hub.users.isEmpty()) item { ConnectCard(hub) }
         if (reading.isNotEmpty()) {
             item { Section("Reprendre la lecture") }
             item {
@@ -275,12 +289,12 @@ fun Feed(hub: Hub) {
 
 // ---------- Bibliothèque ----------
 @Composable
-fun SearchBox(v: String, on: (String) -> Unit) {
+fun SearchBox(v: String, hint: String = "Titre, auteur, fandom, tag…", on: (String) -> Unit) {
     Row(Modifier.padding(horizontal = 20.dp).fillMaxWidth().height(52.dp).clip(RoundedCornerShape(18.dp)).background(Surf2).padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Icon(Icons.Default.Search, null, tint = Mut)
         Box(Modifier.weight(1f).padding(horizontal = 10.dp)) {
-            if (v.isEmpty()) Text("Titre, auteur, fandom, tag…", color = Mut, fontSize = 16.sp)
+            if (v.isEmpty()) Text(hint, color = Mut, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             BasicTextField(v, on, singleLine = true, textStyle = TextStyle(color = Txt, fontSize = 16.sp), cursorBrush = SolidColor(A1), modifier = Modifier.fillMaxWidth())
         }
         if (v.isNotEmpty()) Icon(Icons.Default.Close, null, tint = Mut, modifier = Modifier.clickable { on("") })
@@ -291,7 +305,11 @@ fun SearchBox(v: String, on: (String) -> Unit) {
 fun Library(hub: Hub) {
     var q by remember { mutableStateOf("") }
     var f by remember { mutableIntStateOf(0) }
-    val filters = listOf("Tout", "En cours de lecture", "Nouveautés", "Abonnement", "Favori", "À lire", "Terminées", "Hors ligne")
+    var adding by remember { mutableStateOf(false) }
+    var link by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+    val sites = listOf("AO3") + Sites.all.map { it.name }
+    val filters = listOf("Tout", "En cours de lecture", "Nouveautés", "Abonnement", "Favori", "À lire", "Terminées", "Hors ligne") + sites
     val list = hub.works.filter { w ->
         (q.isBlank() || listOf(w.title, w.author, w.fandoms.joinToString(), w.tags.joinToString()).any { it.contains(q, true) }) && when (f) {
             1 -> w.progress > 0.01f && w.progress < 0.985f
@@ -299,12 +317,25 @@ fun Library(hub: Hub) {
             3, 4, 5 -> filters[f] in w.sources
             6 -> w.complete
             7 -> hub.hasText(w.id)
+            in 8..20 -> w.site == filters[f]
             else -> true
         }
     }.sortedWith(compareByDescending<Work> { it.newChapters > 0 }.thenByDescending { it.lastRead }.thenBy { it.title.lowercase() })
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 120.dp)) {
         item { Header(hub, "Bibliothèque") }
-        item { Text("${hub.works.size} fanfictions · AO3", color = Mut, fontSize = 14.sp, modifier = Modifier.padding(start = 22.dp, bottom = 16.dp)) }
+        item {
+            Row(Modifier.padding(start = 22.dp, end = 20.dp, bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("${hub.works.size} fanfictions", color = Mut, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                FilterPill(if (adding) "Fermer" else "+ Ajouter par lien", adding) { adding = !adding }
+            }
+        }
+        if (adding) item {
+            Column(Modifier.padding(bottom = 14.dp)) {
+                SearchBox(link, "Colle le lien d'une fanfiction") { link = it }
+                Text("AO3, Wattpad, FanFiction.net ou Spirit. Astuce : dans Chrome, Partager → Fanfic Hub.", color = Mut, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 22.dp, vertical = 8.dp))
+                Box(Modifier.padding(horizontal = 20.dp)) { GradButton("Ajouter") { if (link.isNotBlank()) { val l = link; link = ""; adding = false; scope.launch { hub.importUrl(l) } } } }
+            }
+        }
         item { SearchBox(q) { q = it } }
         item {
             LazyRow(Modifier.padding(vertical = 14.dp), contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -337,7 +368,7 @@ fun Account(hub: Hub) {
             }
             Spacer(Modifier.height(16.dp))
             if (hub.user == null) {
-                GradButton("Se connecter à AO3") { hub.push(Screen.Login) }
+                GradButton("Se connecter à AO3") { hub.push(Screen.Login("AO3")) }
                 Text("Ou entre seulement ton pseudo (favoris publics, sans abonnements) :", color = Mut, fontSize = 13.sp, modifier = Modifier.padding(top = 18.dp, bottom = 8.dp))
                 SearchBox(manual) { manual = it }
                 Spacer(Modifier.height(10.dp))
@@ -366,33 +397,55 @@ fun Account(hub: Hub) {
                 Text("Taille du texte : ${hub.size}", color = Mut, fontSize = 14.sp, modifier = Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                 Text("A+", color = Txt, fontSize = 22.sp, modifier = Modifier.clip(CircleShape).clickable { hub.setReader(s = hub.size + 1) }.padding(14.dp))
             }
-            Text("Bientôt", color = Txt, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 30.dp, bottom = 12.dp))
-            listOf("Spirit Fanfics", "Wattpad", "FanFiction.net").forEach { s ->
-                Row(Modifier.padding(bottom = 8.dp).fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Surf).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(10.dp).clip(CircleShape).background(fandomColor(s)))
-                    Text(s, color = Txt, fontSize = 15.sp, modifier = Modifier.weight(1f).padding(start = 12.dp))
-                    Pill("En préparation", Mut)
-                }
+            Text("Autres sites", color = Txt, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 30.dp, bottom = 4.dp))
+            Text("Ou partage n'importe quelle fanfiction depuis Chrome vers Fanfic Hub.", color = Mut, fontSize = 13.sp, modifier = Modifier.padding(bottom = 12.dp))
+            Sites.all.forEach { s -> SiteCard(hub, s) }
+            Text("Application", color = Txt, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 30.dp, bottom = 12.dp))
+            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Surf).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Version ${hub.version}", color = Txt, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                if (hub.newVersion != null) FilterPill(hub.updating?.let { "${(it * 100).toInt()} %" } ?: "Mettre à jour", true) { scope.launch { hub.doUpdate() } }
+                else FilterPill("Vérifier", false) { scope.launch { hub.checkUpdate(manual = true) } }
             }
+        }
+    }
+}
+
+@Composable
+fun SiteCard(hub: Hub, s: Site) {
+    val user = hub.users[s.name]
+    var v by remember(user) { mutableStateOf(user ?: "") }
+    Column(Modifier.padding(bottom = 10.dp).fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(Surf).padding(vertical = 16.dp)) {
+        Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(10.dp).clip(CircleShape).background(fandomColor(s.name)))
+            Text(s.name, color = Txt, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f).padding(start = 12.dp))
+            Pill(user ?: "Non configuré", if (user != null) A1 else Mut)
+        }
+        Spacer(Modifier.height(12.dp))
+        SearchBox(v, s.userHint) { v = it }
+        Row(Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterPill("Ouvrir le site", false) { hub.push(Screen.Login(s.name)) }
+            FilterPill(if (user == null) "Enregistrer" else "Mettre à jour", true) { hub.saveSiteUser(s.name, v) }
+            if (user != null) FilterPill("Retirer", false) { hub.saveSiteUser(s.name, null) }
         }
     }
 }
 
 // ---------- Connexion ----------
 @Composable
-fun Login(hub: Hub) {
+fun Login(hub: Hub, site: String) {
     val scope = rememberCoroutineScope()
     var done by remember { mutableStateOf(false) }
     fun finish(name: String?) {
         if (done) return
         done = true
         CookieManager.getInstance().flush()
+        if (site != "AO3") { hub.pop(); return }
         scope.launch { if (name != null) hub.saveUser(name) else hub.detectUser(); hub.pop(); hub.tab = 0; hub.sync() }
     }
     Column(Modifier.fillMaxSize().background(Bg)) {
         Row(Modifier.statusBarsPadding().padding(12.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             CircleIcon(Icons.AutoMirrored.Filled.ArrowBack) { hub.pop() }
-            Text("Connexion à AO3", color = Txt, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f).padding(start = 12.dp))
+            Text(if (site == "AO3") "Connexion à AO3" else site, color = Txt, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f).padding(start = 12.dp))
             Text("Terminé", color = A1, fontWeight = FontWeight.Bold, modifier = Modifier.clip(CircleShape).clickable { finish(null) }.padding(12.dp))
         }
         AndroidView(factory = { ctx ->
@@ -404,10 +457,10 @@ fun Login(hub: Hub) {
                     override fun onPageFinished(v: WebView, url: String) {
                         val name = Regex("^https://archiveofourown\\.org/users/([^/?#]+)").find(url)?.groupValues?.get(1)
                         val logged = CookieManager.getInstance().getCookie(Ao3.BASE)?.contains("user_credentials") == true
-                        if (!url.contains("/users/login") && (logged || (name != null && name != "login"))) finish(name?.takeIf { it != "login" })
+                        if (site == "AO3" && !url.contains("/users/login") && (logged || (name != null && name != "login"))) finish(name?.takeIf { it != "login" })
                     }
                 }
-                loadUrl(Ao3.BASE + "/users/login")
+                loadUrl(if (site == "AO3") Ao3.BASE + "/users/login" else Sites.of(site)?.home ?: Ao3.BASE)
             }
         }, modifier = Modifier.fillMaxSize().navigationBarsPadding())
     }
@@ -465,7 +518,7 @@ fun Detail(hub: Hub, id: String) {
                     }
                     err?.let { Text(it, color = Color(0xFFF87171), fontSize = 14.sp, modifier = Modifier.padding(top = 10.dp)) }
                     Spacer(Modifier.height(10.dp))
-                    GhostButton("Ouvrir sur AO3") { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("${Ao3.BASE}/works/$id"))) }
+                    GhostButton("Ouvrir sur ${w.site}") { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(w.link))) }
                     if (w.summary.isNotBlank()) {
                         Text("Résumé", color = Txt, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 28.dp, bottom = 8.dp))
                         Text(w.summary, color = Color(0xFFCFCFDA), fontSize = 15.sp, lineHeight = 23.sp)

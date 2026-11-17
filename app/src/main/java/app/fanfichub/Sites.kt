@@ -1,0 +1,228 @@
+package app.fanfichub
+
+import android.annotation.SuppressLint
+import android.content.Context
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import org.json.JSONArray
+import org.json.JSONObject
+import org.json.JSONTokener
+import org.jsoup.Jsoup
+import org.jsoup.nodes.Document
+import org.jsoup.safety.Safelist
+import java.net.URLEncoder
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import kotlin.coroutines.resume
+
+/**
+ * Navigateur invisible : charge la page comme un vrai navigateur (passe les protections anti-robot
+ * de type Cloudflare quand elles n'exigent pas de clic) puis renvoie le HTML.
+ */
+object Web {
+    @SuppressLint("StaticFieldLeak") private var wv: WebView? = null
+    lateinit var app: Context
+    private val lock = Mutex()
+
+    @SuppressLint("SetJavaScriptEnabled")
+    suspend fun html(url: String): Document = lock.withLock {
+        val raw = withContext(Dispatchers.Main) {
+            val w = wv ?: WebView(app).apply { settings.javaScriptEnabled = true; settings.domStorageEnabled = true }.also { wv = it }
+            withTimeoutOrNull(60_000) {
+                suspendCancellableCoroutine<String> { cont ->
+                    var tries = 0
+                    fun grab() {
+                        w.evaluateJavascript("document.title+'\\u0001'+document.documentElement.outerHTML") { r ->
+                            val s = runCatching { JSONTokener(r).nextValue() as String }.getOrDefault("")
+                            val title = s.substringBefore('\u0001')
+                            val challenge = title.contains("Just a moment", true) || title.contains("Un instant", true) || title.contains("Attention Required", true)
+                            if ((challenge || s.length < 1500) && tries++ < 25) w.postDelayed({ if (cont.isActive) grab() }, 1500)
+                            else if (cont.isActive) cont.resume(s)
+                        }
+                    }
+                    w.webViewClient = object : WebViewClient() {
+                        override fun onPageFinished(v: WebView, u: String?) { if (cont.isActive && tries == 0) grab() }
+                    }
+                    cont.invokeOnCancellation { w.post { w.stopLoading() } }
+                    w.loadUrl(url)
+                }
+            }
+        } ?: error("Le site ne répond pas")
+        val title = raw.substringBefore('\u0001')
+        if (title.contains("Just a moment", true) || title.contains("Attention Required", true))
+            error("Le site demande une vérification : ouvre-le une fois via « Ouvrir le site » dans l'onglet Compte")
+        Jsoup.parse(raw.substringAfter('\u0001'), url)
+    }
+}
+
+interface Site {
+    val name: String
+    val home: String
+    val userHint: String
+    fun owns(url: String): Boolean
+    suspend fun info(url: String): Work?
+    suspend fun download(w: Work): Pair<List<String>, String>
+    suspend fun library(user: String, known: Map<String, Work>): List<Work>
+}
+
+object Sites {
+    val all = listOf(Spirit, Wattpad, Ffn)
+    fun of(name: String) = all.firstOrNull { it.name == name }
+    fun find(url: String) = all.firstOrNull { it.owns(url) }
+}
+
+fun sections(parts: List<Pair<String, String>>): Pair<List<String>, String> {
+    val titles = parts.mapIndexed { i, (t, _) -> t.ifBlank { "Chapitre ${i + 1}" } }
+    return titles to parts.mapIndexed { i, (_, h) ->
+        "<section id='c$i'><h2>${Jsoup.clean(titles[i], Safelist.none())}</h2>${Jsoup.clean(h, Safelist.relaxed())}</section>"
+    }.joinToString("")
+}
+
+/** Repère le bloc de texte principal d'une page (celui qui contient le plus de paragraphes). */
+fun mainText(d: Document): String {
+    d.select("script,style,nav,header,footer,aside,form,noscript").remove()
+    return d.select("div,article,section").maxByOrNull { e ->
+        e.children().filter { it.tagName() == "p" }.sumOf { it.text().length } + e.ownText().length
+    }?.html() ?: ""
+}
+
+private fun digits(s: String?) = s?.filter { it.isDigit() }?.toIntOrNull() ?: 0
+
+object Wattpad : Site {
+    override val name = "Wattpad"
+    override val home = "https://www.wattpad.com/login"
+    override val userHint = "Ton pseudo Wattpad"
+    private const val B = "https://www.wattpad.com"
+    private const val F = "id,title,user(name),description,tags,completed,numParts,voteCount,mature,lastPublishedPart(createDate)"
+    override fun owns(url: String) = "wattpad.com" in url
+
+    private suspend fun json(u: String): String = withContext(Dispatchers.IO) {
+        Thread.sleep(300)
+        Jsoup.connect(u).ignoreContentType(true).userAgent(UA).cookies(cookiesFor(B)).timeout(30000).execute().body()
+    }
+
+    private fun work(o: JSONObject): Work {
+        val n = o.optInt("numParts", 1); val done = o.optBoolean("completed")
+        val tags = o.optJSONArray("tags")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
+        val id = o.get("id").toString()
+        return Work("wp:$id", o.optString("title"), o.optJSONObject("user")?.optString("name") ?: "", listOf(tags.firstOrNull() ?: "Wattpad"),
+            if (o.optBoolean("mature")) "Mature" else "", 0, "$n/${if (done) n else "?"}", o.optInt("voteCount"), o.optString("description").take(700),
+            tags.take(14), o.optJSONObject("lastPublishedPart")?.optString("createDate")?.take(10) ?: "", done, setOf("Favori"),
+            site = name, url = "$B/story/$id")
+    }
+
+    override suspend fun info(url: String): Work? {
+        var id = Regex("/story/(\\d+)").find(url)?.groupValues?.get(1)
+        if (id == null) Regex("wattpad\\.com/(\\d+)").find(url)?.groupValues?.get(1)?.let { pid ->
+            id = JSONObject(json("$B/api/v3/story_parts/$pid?fields=groupId")).optString("groupId").ifEmpty { null }
+        }
+        return id?.let { work(JSONObject(json("$B/api/v3/stories/$it?fields=$F"))) }
+    }
+
+    override suspend fun download(w: Work): Pair<List<String>, String> {
+        val parts = JSONObject(json("$B/api/v3/stories/${w.id.removePrefix("wp:")}?fields=parts(id,title)")).getJSONArray("parts")
+        return sections((0 until parts.length()).map { i -> parts.getJSONObject(i).let { p -> p.optString("title") to text(p.get("id").toString()) } })
+    }
+
+    private suspend fun text(pid: String): String {
+        val sb = StringBuilder()
+        for (page in 1..30) {
+            val h = json("$B/apiv2/storytext?id=$pid&page=$page")
+            if (h.isBlank() || sb.contains(h)) break
+            sb.append(h)
+        }
+        return sb.toString()
+    }
+
+    override suspend fun library(user: String, known: Map<String, Work>): List<Work> {
+        val o = JSONObject(json("$B/api/v3/users/${URLEncoder.encode(user, "UTF-8")}/library?limit=200&fields=stories($F)"))
+        val a = o.optJSONArray("stories") ?: JSONArray()
+        return (0 until a.length()).map { work(a.getJSONObject(it)) }
+    }
+}
+
+object Ffn : Site {
+    override val name = "FanFiction.net"
+    override val home = "https://www.fanfiction.net/"
+    override val userHint = "Lien ou numéro de ton profil (fanfiction.net/u/…)"
+    private const val B = "https://www.fanfiction.net"
+    override fun owns(url: String) = "fanfiction.net" in url
+    private fun stat(t: String, k: String) = Regex("$k:\\s*([\\d,]+)").find(t)?.groupValues?.get(1)
+    private fun date(sec: String) = sec.toLongOrNull()?.let { SimpleDateFormat("dd/MM/yyyy", Locale.FRANCE).format(Date(it * 1000)) } ?: ""
+
+    override suspend fun info(url: String): Work? {
+        val id = Regex("/s/(\\d+)").find(url)?.groupValues?.get(1) ?: return null
+        val d = Web.html("$B/s/$id/1/")
+        val top = d.selectFirst("#profile_top") ?: error("Page FanFiction.net illisible")
+        val st = top.selectFirst("span.xgray")?.text() ?: ""
+        val n = digits(stat(st, "Chapters")).coerceAtLeast(1)
+        val done = "Status: Complete" in st
+        return Work("ffn:$id", top.selectFirst("b.xcontrast_txt")?.text() ?: "Sans titre", top.selectFirst("a[href^=/u/]")?.text() ?: "",
+            listOf(d.select("#pre_story_links a").lastOrNull()?.text() ?: name), Regex("Rated:\\s*(?:Fiction\\s*)?(\\S+)").find(st)?.groupValues?.get(1) ?: "",
+            digits(stat(st, "Words")), "$n/${if (done) n else "?"}", digits(stat(st, "Favs")), top.selectFirst("div.xcontrast_txt")?.text() ?: "",
+            emptyList(), Regex("Updated:\\s*([^-]+)").find(st)?.groupValues?.get(1)?.trim() ?: "", done, setOf("Favori"), site = name, url = "$B/s/$id")
+    }
+
+    override suspend fun download(w: Work): Pair<List<String>, String> {
+        val id = w.id.removePrefix("ffn:")
+        val first = Web.html("$B/s/$id/1/")
+        val titles = first.selectFirst("select#chap_select")?.select("option")?.map { it.text() } ?: listOf("")
+        return sections(titles.mapIndexed { i, t ->
+            val d = if (i == 0) first else Web.html("$B/s/$id/${i + 1}/")
+            t to (d.selectFirst("#storytext")?.html() ?: "")
+        })
+    }
+
+    override suspend fun library(user: String, known: Map<String, Work>): List<Work> {
+        val uid = Regex("(\\d+)").find(user)?.value ?: return emptyList()
+        return Web.html("$B/u/$uid/").select("div.favstories").mapNotNull { e ->
+            val id = e.attr("data-storyid").ifEmpty { return@mapNotNull null }
+            val n = e.attr("data-chapters").toIntOrNull() ?: 1; val done = e.attr("data-statusid") == "2"
+            Work("ffn:$id", e.attr("data-title"), e.select("a[href^=/u/]").firstOrNull()?.text() ?: "", listOf(e.attr("data-category").ifEmpty { name }), "",
+                e.attr("data-wordcount").toIntOrNull() ?: 0, "$n/${if (done) n else "?"}", 0, e.selectFirst("div.z-indent")?.ownText() ?: "", emptyList(),
+                date(e.attr("data-dateupdate")), done, setOf("Favori"), site = name, url = "$B/s/$id")
+        }
+    }
+}
+
+object Spirit : Site {
+    override val name = "Spirit Fanfics"
+    override val home = "https://www.spiritfanfics.com/login"
+    override val userHint = "Ton pseudo Spirit"
+    private const val B = "https://www.spiritfanfics.com"
+    override fun owns(url: String) = "spiritfanfics.com" in url
+    private fun slug(url: String) = Regex("/historia/([a-z0-9-]+-\\d+)").find(url)?.groupValues?.get(1)
+    private fun chapters(d: Document, s: String) =
+        d.select("a[href*=/historia/$s/]").filter { Regex("/historia/$s/[^/?#]+").containsMatchIn(it.attr("href")) && it.text().isNotBlank() }
+            .map { it.absUrl("href").substringBefore('#') to it.text() }.distinctBy { it.first }
+
+    override suspend fun info(url: String): Work? {
+        val s = slug(url) ?: return null
+        val d = Web.html("$B/historia/$s")
+        val body = d.text()
+        val n = chapters(d, s).size.coerceAtLeast(1)
+        val done = Regex("Conclu[ií]da|Terminada|Completa", RegexOption.IGNORE_CASE).containsMatchIn(body)
+        return Work("sp:$s", d.selectFirst("h1")?.text() ?: s, d.selectFirst("a[href*=/perfil/]")?.text() ?: "",
+            listOf(d.selectFirst("a[href*=/categorias/]")?.text() ?: name), "", digits(Regex("([\\d.]+)\\s+palavras").find(body)?.groupValues?.get(1)),
+            "$n/${if (done) n else "?"}", 0, d.selectFirst("meta[name=description]")?.attr("content") ?: "", emptyList(), "", done, setOf("Favori"),
+            site = name, url = "$B/historia/$s")
+    }
+
+    override suspend fun download(w: Work): Pair<List<String>, String> {
+        val s = w.id.removePrefix("sp:")
+        val chaps = chapters(Web.html("$B/historia/$s"), s).ifEmpty { listOf("$B/historia/$s" to w.title) }
+        return sections(chaps.map { (u, t) -> t to mainText(Web.html(u)) })
+    }
+
+    override suspend fun library(user: String, known: Map<String, Work>): List<Work> {
+        val slugs = Web.html("$B/biblioteca").select("a[href*=/historia/]").mapNotNull { slug(it.attr("href")) }.distinct().take(80)
+        return slugs.mapNotNull { s -> known["sp:$s"]?.takeIf { it.complete } ?: runCatching { info("$B/historia/$s") }.getOrNull() }
+    }
+}

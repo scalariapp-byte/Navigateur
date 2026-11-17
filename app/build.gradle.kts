@@ -3,10 +3,13 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+val run = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
 android {
+    signingConfigs { create("hub") { storeFile = file("hub.keystore"); storePassword = "fanfichub"; keyAlias = "hub"; keyPassword = "fanfichub" } }
     namespace = "app.fanfichub"
     compileSdk = 36
-    defaultConfig { applicationId = "app.fanfichub"; minSdk = 26; targetSdk = 34; versionCode = 1; versionName = "1.0" }
+    defaultConfig { applicationId = "app.fanfichub"; minSdk = 26; targetSdk = 34; versionCode = run; versionName = "1.$run" }
+    buildTypes { getByName("debug") { signingConfig = signingConfigs.getByName("hub") } }
     buildFeatures { compose = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }

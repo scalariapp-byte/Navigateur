@@ -14,8 +14,9 @@ data class Work(
     val id: String, val title: String, val author: String, val fandoms: List<String>, val rating: String,
     val words: Int, val chapters: String, val kudos: Int, val summary: String, val tags: List<String>,
     val updated: String, val complete: Boolean, val sources: Set<String>,
-    val newChapters: Int = 0, val progress: Float = 0f, val lastRead: Long = 0L, val site: String = "AO3",
+    val newChapters: Int = 0, val progress: Float = 0f, val lastRead: Long = 0L, val site: String = "AO3", val url: String = "",
 ) {
+    val link get() = url.ifEmpty { "${Ao3.BASE}/works/$id" }
     val published get() = chapters.substringBefore('/').trim().toIntOrNull() ?: 1
     val fandom get() = fandoms.firstOrNull() ?: "Original"
 
@@ -23,7 +24,7 @@ data class Work(
         put("id", id); put("title", title); put("author", author); put("fandoms", JSONArray(fandoms)); put("rating", rating)
         put("words", words); put("chapters", chapters); put("kudos", kudos); put("summary", summary); put("tags", JSONArray(tags))
         put("updated", updated); put("complete", complete); put("sources", JSONArray(sources.toList()))
-        put("newChapters", newChapters); put("progress", progress.toDouble()); put("lastRead", lastRead); put("site", site)
+        put("newChapters", newChapters); put("progress", progress.toDouble()); put("lastRead", lastRead); put("site", site); put("url", url)
     }
 
     companion object {
@@ -32,7 +33,7 @@ data class Work(
             o.getString("id"), o.getString("title"), o.getString("author"), o.getJSONArray("fandoms").strings(), o.optString("rating"),
             o.optInt("words"), o.optString("chapters", "1/1"), o.optInt("kudos"), o.optString("summary"), o.getJSONArray("tags").strings(),
             o.optString("updated"), o.optBoolean("complete"), o.getJSONArray("sources").strings().toSet(),
-            o.optInt("newChapters"), o.optDouble("progress", 0.0).toFloat(), o.optLong("lastRead"), o.optString("site", "AO3"),
+            o.optInt("newChapters"), o.optDouble("progress", 0.0).toFloat(), o.optLong("lastRead"), o.optString("site", "AO3"), o.optString("url"),
         )
     }
 }
@@ -45,13 +46,15 @@ class Store(private val dir: File) {
     fun titles(id: String) = File(dir, "t_$id.txt")
 }
 
+const val UA = "Mozilla/5.0 (Linux; Android 14) FanficHub/1.0 (lecteur personnel)"
+
+fun cookiesFor(base: String): Map<String, String> = CookieManager.getInstance().getCookie(base)?.split(";")
+    ?.mapNotNull { c -> c.trim().split("=", limit = 2).takeIf { it.size == 2 }?.let { it[0] to it[1] } }?.toMap() ?: emptyMap()
+
 /** AO3 n'a pas d'API publique : on lit les pages HTML avec la session du compte, lentement (une requête toutes les ~0,8 s). */
 object Ao3 {
     const val BASE = "https://archiveofourown.org"
-    private const val UA = "Mozilla/5.0 (Linux; Android 14) FanficHub/1.0 (lecteur personnel)"
-
-    private fun cookies(): Map<String, String> = CookieManager.getInstance().getCookie(BASE)?.split(";")
-        ?.mapNotNull { c -> c.trim().split("=", limit = 2).takeIf { it.size == 2 }?.let { it[0] to it[1] } }?.toMap() ?: emptyMap()
+    private fun cookies() = cookiesFor(BASE)
 
     private fun get(path: String): Document {
         var wait = 350L
