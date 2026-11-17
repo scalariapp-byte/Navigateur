@@ -92,6 +92,8 @@ fun SearchTab(hub: Hub) {
     val q = hub.query
     val focus = LocalFocusManager.current
     var filters by remember { mutableStateOf(false) }
+    var showLists by remember { mutableStateOf(false) }
+    val wpMode = q.site == "Wattpad" && q.wpLists
     var picking by remember { mutableStateOf<FormField?>(null) }
     var sugg by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
     val langs = listOf("" to "Toutes", "fr" to "Français", "en" to "Anglais", "es" to "Espagnol", "ptBR" to "Portugais")
@@ -201,7 +203,16 @@ fun SearchTab(hub: Hub) {
                 Text("‹ Listes", color = A1, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.clip(CircleShape).clickable { hub.openList(null) }.padding(10.dp))
                 Text(opened.name, color = Txt, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-        } else if (hub.listHits.isNotEmpty()) items(hub.listHits, key = { "l" + it.id }) { h ->
+        } else if (wpMode && (hub.results.isNotEmpty() || hub.listHits.isNotEmpty())) item {
+            Row(Modifier.padding(start = 20.dp, end = 20.dp, top = 16.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Choice("Fanfictions ${hub.results.size}", !showLists) { showLists = false }
+                Choice("Listes ${hub.listHits.size}", showLists) { showLists = true }
+                Spacer(Modifier.weight(1f))
+                if (!showLists && hub.results.isNotEmpty()) Text("Tout ajouter", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clip(CircleShape).background(Grad).clickable { hub.addAllWattpad() }.padding(horizontal = 14.dp, vertical = 8.dp))
+            }
+        }
+        if (opened == null && (!wpMode || showLists) && hub.listHits.isNotEmpty()) items(hub.listHits, key = { "l" + it.id }) { h ->
             Row(Modifier.padding(horizontal = 20.dp, vertical = 5.dp).fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Surf).clickable { hub.openList(h) }.padding(12.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(width = 48.dp, height = 64.dp).clip(RoundedCornerShape(6.dp)).background(Surf2)) { if (h.cover.isNotBlank()) NetFill(h.cover) }
@@ -212,15 +223,16 @@ fun SearchTab(hub: Hub) {
                 Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Mut)
             }
         }
-        if (hub.results.isNotEmpty()) item {
+        val showResults = !(wpMode && showLists && opened == null)
+        if (showResults && hub.results.isNotEmpty() && !wpMode) item {
             Text("${hub.results.size} résultat" + if (hub.results.size > 1) "s" else "", color = Mut, fontSize = 13.sp, modifier = Modifier.padding(start = 22.dp, top = 18.dp, bottom = 6.dp))
         }
-        items(hub.results, key = { it.id }) { w ->
+        if (showResults) items(hub.results, key = { it.id }) { w ->
             Box {
                 WorkCard(w, Modifier.padding(horizontal = 20.dp, vertical = 6.dp)) { hub.push(Screen.Detail(w.id)) }
                 if (!hub.inLibrary(w.id)) Text("+", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold,
                     modifier = Modifier.align(Alignment.BottomEnd).padding(end = 30.dp, bottom = 16.dp).clip(CircleShape).background(Grad)
-                        .clickable { hub.addToLibrary(w) }.padding(horizontal = 12.dp, vertical = 2.dp))
+                        .clickable { if (wpMode) hub.addToWattpad(w) else hub.addToLibrary(w) }.padding(horizontal = 12.dp, vertical = 2.dp))
                 else Text("✓", color = A1, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.BottomEnd).padding(end = 34.dp, bottom = 18.dp))
             }
         }

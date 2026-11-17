@@ -257,14 +257,16 @@ object Wattpad : Site {
      * 1) histoires de chaque tag + des tags combinés, 2) leurs auteurs, puis les LECTEURS (abonnés de ces auteurs,
      * y compris ceux qui n'ont rien publié), 3) chaque liste de ces comptes est lue et analysée dès qu'elle est trouvée.
      */
-    suspend fun scanLists(query: String, onProgress: (String) -> Unit, onHit: (ListHit) -> Unit) = coroutineScope {
+    suspend fun scanLists(query: String, onProgress: (String) -> Unit, onHit: (ListHit) -> Unit, onStory: (Work, Int) -> Unit = { _, _ -> }) = coroutineScope {
         val tags = splitTags(query)
         if (tags.isEmpty()) error("tag vide")
-        val bots = Semaphore(25)
+        val bots = Semaphore(32)
+        fun matched(w: Work) = tags.count { t -> tagged(w.tags, w.title, t) }
         val queries = (tags + if (tags.size > 1) listOf(tags.joinToString(" ")) else emptyList()).distinct()
         val stories = queries.flatMap { t -> (0 until 8).map { p -> async { bots.withPermit { runCatching { searchStories(t, p * 20) }.getOrDefault(emptyList()) } } } }
             .awaitAll().flatten().distinctBy { it.id }
         if (stories.isEmpty()) error("aucune histoire trouvée")
+        stories.forEach { w -> matched(w).takeIf { it > 0 }?.let { onStory(w, it) } }
         val byTag = tags.map { t -> stories.filter { w -> w.tags.any { norm(it).contains(t) } || norm(w.title).contains(t) }.map { it.author } }
         val authors = (byTag.flatMap { it.withIndex() }.sortedBy { it.index }.map { it.value } + stories.map { it.author })
             .filter { it.isNotBlank() }.distinctBy { it.lowercase() }.take(120)
@@ -276,11 +278,13 @@ object Wattpad : Site {
 
         suspend fun analyse(h: ListHit) = bots.withPermit {
             runCatching {
-                val a = JSONObject(json("$B/api/v3/lists/${h.id}/stories?limit=100&fields=stories(id,title,tags)", "ui")).optJSONArray("stories") ?: JSONArray()
+                val a = JSONObject(json("$B/api/v3/lists/${h.id}/stories?limit=100&fields=stories($F)", "ui")).optJSONArray("stories") ?: JSONArray()
                 val st = (0 until a.length()).map { i -> a.getJSONObject(i).let { o ->
                     val t = o.optJSONArray("tags")
                     val all = (if (t == null) emptyList() else (0 until t.length()).map { norm(t.optString(it)) }) + norm(o.optString("title"))
-                    tags.filter { tg -> all.any { it.contains(tg) } }.toSet()
+                    tags.filter { tg -> all.any { it.contains(tg) } }.toSet().also { m ->
+                        if (m.isNotEmpty()) runCatching { onStory(work(o).copy(sources = setOf("Recherche")), m.size) }
+                    }
                 } }
                 val per = tags.map { tg -> st.count { tg in it } }
                 if (per.all { it > 0 }) {
@@ -362,6 +366,19 @@ object Wattpad : Site {
     }
 
     suspend fun listWorks(id: String): List<Work> = listStories(id).map { work(it).copy(sources = setOf("Recherche")) }
+
+    // ---- Compte Wattpad : listes de lecture (session du navigateur intégré)
+    private suspend fun post(url: String, data: Map<String, String>): String? = withContext(Dispatchers.IO) {
+        runCatching {
+            val r = Jsoup.connect(url).method(org.jsoup.Connection.Method.POST).data(data).ignoreContentType(true).ignoreHttpErrors(true)
+                .userAgent(BROWSER_UA).header("Accept", "application/json").header("X-Requested-With", "XMLHttpRequest")
+                .cookies(cookiesFor(B)).timeout(20000).execute()
+            r.body().takeIf { r.statusCode() in 200..299 }
+        }.getOrNull()
+    }
+    suspend fun userLists(user: String) = lists(enc(user))
+    suspend fun createList(name: String): String? = post("$B/api/v3/lists", mapOf("name" to name))?.let { runCatching { JSONObject(it).get("id").toString() }.getOrNull() }
+    suspend fun addToList(listId: String, storyId: String): Boolean = post("$B/api/v3/lists/$listId/stories", mapOf("stories" to storyId)) != null
 
     private fun acc(o: JSONObject) = Account(o.optString("username"), o.optString("name"), "@" + o.optString("username"), o.optString("avatar"),
         listOfNotNull(o.optInt("numLists", -1).takeIf { it >= 0 }?.let { "$it listes" }, o.optInt("numFollowers", -1).takeIf { it >= 0 }?.let { "$it abonnés" },

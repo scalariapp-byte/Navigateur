@@ -22,6 +22,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 sealed interface Screen {
@@ -42,7 +43,9 @@ class Hub(ctx: Context) {
     var tab by mutableIntStateOf(0)
     var user by mutableStateOf(prefs.getString("user", null)); private set
     var syncing by mutableStateOf(false); private set
-    var status by mutableStateOf<String?>(null)
+    /** Message court affiché en bulle (Toast). */
+    var status: String? = null
+        set(v) { field = v; if (v != null) android.os.Handler(android.os.Looper.getMainLooper()).post { android.widget.Toast.makeText(ctx, v, android.widget.Toast.LENGTH_SHORT).show() } }
     var theme by mutableIntStateOf(prefs.getInt("theme", 0)); private set
     var size by mutableIntStateOf(prefs.getInt("size", 19)); private set
     val users = mutableStateMapOf<String, String>().apply { Sites.all.forEach { s -> prefs.getString("user_${s.name}", null)?.let { put(s.name, it) } } }
@@ -136,20 +139,27 @@ class Hub(ctx: Context) {
         if (!more) { results.clear(); listHits.clear(); openedList = null; searchPage = 1 } else searchPage++
         if (q.site == "Wattpad" && q.wpLists) {
             // Tout Wattpad : plusieurs robots en parallèle cherchent les listes qui contiennent des histoires avec ce tag
-            searching = true; searchErr = null; searchMore = false; listTag = q.text.trim(); searchInfo = "25 robots : recherche des histoires " + Wattpad.splitTags(listTag).joinToString(" + ") { "#$it" } + "…"
+            searching = true; searchErr = null; searchMore = false; listTag = q.text.trim(); searchInfo = "32 robots : recherche des histoires " + Wattpad.splitTags(listTag).joinToString(" + ") { "#$it" } + "…"
             searchJob = scope.launch {
+                agg.clear(); aggDirty = false
+                val ticker = launch { while (true) { kotlinx.coroutines.delay(350); if (aggDirty) { aggDirty = false; rebuildAgg() } } }
                 try {
-                    Wattpad.scanLists(listTag,
+                    withContext(Dispatchers.Default) { Wattpad.scanLists(listTag,
                         onProgress = { msg -> scope.launch { searchInfo = msg } },
                         onHit = { h -> scope.launch {
                             if (listHits.none { it.id == h.id }) {
                                 val at = listHits.indexOfFirst { it.score < h.score }.let { if (it < 0) listHits.size else it }
                                 listHits.add(at, h)
                             }
-                        } })
-                    if (listHits.isEmpty()) searchErr = "Aucune liste trouvée avec des histoires #${listTag}"
+                        } },
+                        onStory = { w, m ->
+                            agg.compute(w.id) { _, o -> if (o == null) Triple(w, m, 1) else Triple(o.first, maxOf(o.second, m), o.third + 1) }
+                            aggDirty = true
+                        }) }
+                    rebuildAgg()
+                    if (listHits.isEmpty() && results.isEmpty()) searchErr = "Rien trouvé avec #${listTag}"
                 } catch (e: kotlinx.coroutines.CancellationException) { throw e
-                } catch (e: Exception) { searchErr = "Recherche impossible : ${e.message}" } finally { searching = false; searchInfo = null }
+                } catch (e: Exception) { searchErr = "Recherche impossible : ${e.message}" } finally { ticker.cancel(); searching = false; searchInfo = null }
             }
             return
         }
@@ -185,10 +195,46 @@ class Hub(ctx: Context) {
     var spiritForm by mutableStateOf<List<FormField>>(emptyList()); private set
     fun loadSpiritForm() { if (spiritForm.isEmpty()) scope.launch { runCatching { Spirit.searchForm() }.onSuccess { spiritForm = it } } }
     private var listTag = ""
+    /** Fanfictions trouvées par les robots : histoire, nb de tags portés, nb de listes où elle apparaît. */
+    private val agg = java.util.concurrent.ConcurrentHashMap<String, Triple<Work, Int, Int>>()
+    @Volatile private var aggDirty = false
+    val aggCount get() = agg.size
+    private fun rebuildAgg() {
+        if (openedList != null) return
+        val sorted = agg.values.sortedWith(compareByDescending<Triple<Work, Int, Int>> { it.second }.thenByDescending { it.third }.thenByDescending { it.first.kudos })
+            .take(600).map { it.first }
+        results.clear(); results.addAll(sorted)
+    }
+
+    // ---- Ajout sur le compte Wattpad, rangé automatiquement dans une liste par tag(s)
+    private val wpListIds = HashMap<String, String>()
+    private val wpLock = kotlinx.coroutines.sync.Mutex()
+    private suspend fun addWp(w: Work): Boolean? {
+        val user = account("Wattpad") ?: return null
+        val tags = Wattpad.splitTags(listTag)
+        val name = tags.filter { Wattpad.tagged(w.tags, w.title, it) }.ifEmpty { tags }.joinToString(" × ") { it.replaceFirstChar(Char::uppercase) }.ifBlank { "Fanfic Hub" }
+        val id = wpLock.withLock {
+            if (wpListIds.isEmpty()) runCatching { Wattpad.userLists(user) }.getOrDefault(emptyList()).forEach { wpListIds[it.second.lowercase()] = it.first }
+            wpListIds[name.lowercase()] ?: Wattpad.createList(name)?.also { wpListIds[name.lowercase()] = it }
+        }
+        update(w.copy(sources = setOf("Liste : $name")))
+        return id != null && Wattpad.addToList(id, w.id.removePrefix("wp:"))
+    }
+    fun addToWattpad(w: Work) { scope.launch {
+        status = when (addWp(w)) { null -> "Ajoutée dans l'app. Connecte ton compte Wattpad pour l'ajouter aussi sur Wattpad"
+            true -> "Ajoutée sur Wattpad, rangée automatiquement"; false -> "Ajoutée dans l'app ; Wattpad a refusé (connecte-toi via « Se connecter sur le site »)" }
+    } }
+    fun addAllWattpad() { scope.launch {
+        val todo = results.filter { !inLibrary(it.id) }
+        status = "Ajout de ${todo.size} fanfictions…"
+        val gate = kotlinx.coroutines.sync.Semaphore(4); var ok = 0
+        todo.map { w -> async { gate.withPermit { if (addWp(w) == true) ok++ } } }.awaitAll()
+        status = if (account("Wattpad") == null) "${todo.size} ajoutées dans l'app (connecte Wattpad pour les envoyer sur ton compte)" else "$ok/${todo.size} ajoutées sur Wattpad, rangées par tag"
+    } }
     var searchInfo by mutableStateOf<String?>(null); private set
     fun openList(h: ListHit?) {
         openedList = h
-        if (h == null) { results.clear(); return }
+        if (h == null) { results.clear(); if (agg.isNotEmpty()) rebuildAgg(); return }
         results.clear(); searchErr = null
         searching = true
         scope.launch {
