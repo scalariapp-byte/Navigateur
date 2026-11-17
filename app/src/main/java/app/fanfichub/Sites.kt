@@ -293,7 +293,7 @@ object Wattpad : Site {
         }
 
         /** Un compte : ses listes, analysées tout de suite. */
-        suspend fun visit(u: String) = coroutineScope {
+        suspend fun visit(u: String): Unit = coroutineScope {
             if (!seenUsers.add(u.lowercase())) return@coroutineScope
             val ls = bots.withPermit { runCatching {
                 val a = JSONObject(json("$B/api/v3/users/${enc(u)}/lists?limit=50&fields=lists(id,name,numStories,cover,user(name))", "ui")).optJSONArray("lists") ?: JSONArray()
@@ -301,6 +301,7 @@ object Wattpad : Site {
             }.getOrDefault(emptyList()) }
             users.incrementAndGet(); progress()
             ls.filter { it.total in 1..1000 && seenLists.add(it.id) }.map { async { analyse(it) } }.awaitAll()
+            Unit
         }
 
         /** Lecteurs d'un auteur : ses abonnés (souvent des comptes sans histoire publiée). */
