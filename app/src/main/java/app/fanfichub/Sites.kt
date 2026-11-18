@@ -726,7 +726,8 @@ object Spirit : Site {
                 val d = runCatching { Web.html(url!!) }.getOrNull() ?: break
                 addStories(d, "Liste : $name")
                 val next = d.select("a[rel=next], a").firstOrNull { it.attr("rel") == "next" || Regex("^pr[óo]xim", ic).containsMatchIn(it.text()) }?.absUrl("href")
-                url = next?.takeIf { it.isNotBlank() && it != url }
+                // Page suivante de la MÊME liste uniquement (pas « liste suivante »)
+                url = next?.takeIf { it.isNotBlank() && it != url && it.substringBefore('?').trimEnd('/') == href.substringBefore('?').trimEnd('/') }
             }
         }
         if (titles.isEmpty()) error("aucune histoire trouvée (favoris, bibliothèque et listes vides ou privés ; connecte-toi à l'étape 1)")
