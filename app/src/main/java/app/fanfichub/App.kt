@@ -44,7 +44,7 @@ class Hub(ctx: Context) {
     var user by mutableStateOf(prefs.getString("user", null)); private set
     var syncing by mutableStateOf(false); private set
     /** État de la synchro : silencieux (jamais en bulle). */
-    var syncInfo: String? = null
+    var syncInfo by mutableStateOf<String?>(null)
     /** Message court affiché en bulle (Toast) : uniquement après une action de l'utilisateur. */
     var status: String? = null
         set(v) { field = v; if (v != null) android.os.Handler(android.os.Looper.getMainLooper()).post { android.widget.Toast.makeText(app, v, android.widget.Toast.LENGTH_SHORT).show() } }

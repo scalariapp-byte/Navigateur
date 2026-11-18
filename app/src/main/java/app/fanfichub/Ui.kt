@@ -551,6 +551,20 @@ fun Accounts(hub: Hub) {
             }
         }
         Group("Synchronisation") {
+            // État en direct : étape en cours + résultat par site
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+                Text(if (hub.syncing) "En cours" else "À l'arrêt", color = if (hub.syncing) A1 else Mut, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                hub.syncInfo?.let { Text(it, color = Txt, fontSize = 14.sp, modifier = Modifier.padding(top = 2.dp)) }
+                if (hub.syncing) androidx.compose.material3.LinearProgressIndicator(
+                    progress = { hub.syncProgress ?: 0f }, color = A1, trackColor = Surf2,
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp).height(3.dp).clip(CircleShape))
+                (listOf("AO3") + Sites.all.map { it.name }).forEach { n -> hub.siteStatus[n]?.let { st ->
+                    Row(Modifier.padding(top = 6.dp)) {
+                        Text(n, color = Mut, fontSize = 13.sp, modifier = Modifier.width(110.dp))
+                        Text(st, color = Txt, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    } } }
+            }
+            Line()
             SettingRow({ RoundIcon(Icons.Default.Refresh) }, "Tout synchroniser", "Rapide : récupère les nouveautés") { hub.startSync() }
             Line()
             SettingRow({ RoundIcon(Icons.Default.Refresh, A2) }, "Synchronisation complète", "Relit tout et retire ce que tu as enlevé") { hub.startSync(full = true) }
