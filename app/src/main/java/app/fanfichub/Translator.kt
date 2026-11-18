@@ -21,11 +21,12 @@ import java.net.URLEncoder
  */
 object Translator {
     /** Google limite les rafales (429) : on réessaie en patientant, en alternant deux points d'accès. */
+    @Volatile private var useDict = false // mémorise le point d'accès qui répond
     private suspend fun google(text: String): String {
         var last: Exception? = null
         for (attempt in 0..4) {
-            try { return if (attempt % 2 == 0) gtx(text) else dict(text) }
-            catch (e: Exception) { last = e; kotlinx.coroutines.delay(700L shl attempt) }
+            try { return (if ((attempt % 2 == 0) != useDict) gtx(text) else dict(text)) }
+            catch (e: Exception) { last = e; useDict = !useDict; kotlinx.coroutines.delay(400L shl attempt) }
         }
         throw last!!
     }

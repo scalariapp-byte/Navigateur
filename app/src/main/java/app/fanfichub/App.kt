@@ -196,6 +196,12 @@ class Hub(ctx: Context) {
      * Diagnostic rapide (≈20 s) : par site, état des fiches (résumé, couverture, titre) puis test ciblé
      * sur 2 fiches sans résumé et sur la page de liste/favoris. Tous les sites en parallèle, délai max 30 s chacun.
      */
+    /** Vide le cache des pages web s'il dépasse 120 Mo (pages des sites, pas tes données). */
+    fun trimCache() { scope.launch {
+        val size = withContext(Dispatchers.IO) { app.cacheDir.walkTopDown().sumOf { it.length() } }
+        if (size > 120L * 1024 * 1024) android.webkit.WebView(app).clearCache(true)
+    } }
+
     fun runDiag() { if (diagRunning) return; diagRunning = true; scope.launch {
         val out = StringBuffer()
         fun log(s: String) { out.append(s).append('\n') }
@@ -410,7 +416,12 @@ class Hub(ctx: Context) {
                 if (su != null) siteStatus[s.name] = "Synchro en cours…"
                 if (su != null) runCatching {
                     syncInfo = "${s.name} · bibliothèque…"; syncProgress = null
-                    val l = s.library(su, old); l.forEach { add(it); libIds += it.id }; publish()
+                    val l = s.library(su, old)
+                    // Résultat anormalement maigre (site qui freine, déconnexion) : on ajoute sans retirer les collections connues
+                    val known = old.values.count { it.site == s.name }
+                    val trusted = known < 20 || l.size >= known / 2
+                    l.forEach { add(it); if (trusted) libIds += it.id }; publish()
+                    if (!trusted) { siteStatus[s.name] = "Incomplet : ${l.size}/$known lues (le site freine), réessai à la prochaine synchro"; return@runCatching }
                     siteStatus[s.name] = "${l.size} fanfictions synchronisées"
                 }.onFailure { e -> siteStatus[s.name] = if (old.values.any { it.site == s.name }) "Synchro partielle : ${e.message}" else "Erreur : ${e.message}" }
                 // Détails : fiches encore incomplètes (« ?/? ») et fanfictions suivies non terminées.
@@ -526,7 +537,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         if (!::hub.isInitialized) return
-        if (::hub.isInitialized) { hub.reload(); hub.startCheck()
+        if (::hub.isInitialized) { hub.reload(); hub.startCheck(); hub.trimCache()
             if (hub.firstRunOfVersion()) hub.startSync() else if (hub.syncDue(2)) hub.startSync(quick = true) }
     }
     override fun onPause() { super.onPause(); if (::hub.isInitialized) runCatching { hub.flush() } }

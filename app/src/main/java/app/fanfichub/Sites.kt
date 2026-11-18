@@ -229,7 +229,9 @@ object Wattpad : Site {
             for (i in 0 until a.length()) put(work(a.getJSONObject(i)).copy(sources = setOf("Bibliothèque")))
         }
         coroutineScope {
-            runCatching { lists(u) }.getOrDefault(emptyList()).map { (id, name) -> async { name to runCatching { listStories(id) }.getOrDefault(emptyList()) } }
+            // 3 listes à la fois : au-delà, Wattpad freine et des listes entières étaient perdues
+            val gate = Semaphore(3)
+            runCatching { lists(u) }.getOrDefault(emptyList()).map { (id, name) -> async { gate.withPermit { name to runCatching { listStories(id) }.getOrDefault(emptyList()) } } }
                 .awaitAll().forEach { (name, st) -> st.forEach { put(work(it).copy(sources = setOf("Liste : $name"))) } }
         }
         return out.values.toList()
