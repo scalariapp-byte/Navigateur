@@ -139,15 +139,23 @@ fun WoodPlank() {
     }
 }
 
+/** Coche de sélection posée sur un livre ou une fiche. */
+@Composable
+fun SelMark(modifier: Modifier = Modifier) {
+    Box(modifier.size(34.dp).clip(CircleShape).background(Color(0xFFE5484D)), contentAlignment = Alignment.Center) {
+        Text("✓", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Black)
+    }
+}
+
 /** Rangées de 4 livres en 3D posés sur des planches, à la largeur de l'écran. */
 @Composable
-fun BookRows(works: List<Work>, onBook: (Work) -> Unit) {
+fun BookRows(works: List<Work>, isSel: (Work) -> Boolean = { false }, onBook: (Work) -> Unit) {
     BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 14.dp)) {
         val bw = ((maxWidth.value - 3 * 10 - 4 * 9 - 8) / 4).toInt().coerceIn(56, 120)
         Column {
             works.chunked(4).forEach { row ->
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Bottom) {
-                    row.forEach { w -> Book3D(w, bw, Modifier.clickable { onBook(w) }) }
+                    row.forEach { w -> Box { Book3D(w, bw, Modifier.clickable { onBook(w) }); if (isSel(w)) SelMark(Modifier.align(Alignment.Center)) } }
                 }
                 WoodPlank()
                 Spacer(Modifier.height(10.dp))
@@ -158,7 +166,7 @@ fun BookRows(works: List<Work>, onBook: (Work) -> Unit) {
 
 /** Une étagère = une collection (liste de lecture, fandom…) : une rangée de 4, le reste via « Tout voir ». */
 @Composable
-fun BookShelf(title: String, works: List<Work>, onAll: () -> Unit, onBook: (Work) -> Unit) {
+fun BookShelf(title: String, works: List<Work>, onAll: () -> Unit, isSel: (Work) -> Boolean = { false }, onBook: (Work) -> Unit) {
     Column(Modifier.padding(bottom = 14.dp)) {
         Row(Modifier.padding(start = 22.dp, end = 12.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -168,7 +176,7 @@ fun BookShelf(title: String, works: List<Work>, onAll: () -> Unit, onBook: (Work
             if (works.size > 4) Text("Tout voir ›", color = A1, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.clip(CircleShape).clickable(onClick = onAll).padding(horizontal = 10.dp, vertical = 6.dp))
         }
-        BookRows(works.take(4), onBook)
+        BookRows(works.take(4), isSel, onBook)
     }
 }
 

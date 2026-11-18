@@ -251,6 +251,22 @@ class Hub(ctx: Context) {
     } }
 
     private val detailing = HashSet<String>()
+
+    // ---- Suppression (masquage) avec annuler / rétablir / tout restaurer
+    val hidden = mutableStateListOf<String>().apply { addAll(prefs.getStringSet("hidden", emptySet()) ?: emptySet()) }
+    private val undoStack = ArrayDeque<Pair<Boolean, Set<String>>>() // (masqué ?, fiches)
+    private val redoStack = ArrayDeque<Pair<Boolean, Set<String>>>()
+    var canUndo by mutableStateOf(false); private set
+    var canRedo by mutableStateOf(false); private set
+    private fun applyHide(hide: Boolean, ids: Set<String>) {
+        if (hide) hidden.addAll(ids.filter { it !in hidden }) else hidden.removeAll(ids)
+        prefs.edit().putStringSet("hidden", hidden.toSet()).apply()
+        canUndo = undoStack.isNotEmpty(); canRedo = redoStack.isNotEmpty()
+    }
+    fun hide(ids: Set<String>) { if (ids.isEmpty()) return; undoStack.addLast(true to ids); redoStack.clear(); applyHide(true, ids) }
+    fun undo() { val a = undoStack.removeLastOrNull() ?: return; redoStack.addLast(a); applyHide(!a.first, a.second) }
+    fun redo() { val a = redoStack.removeLastOrNull() ?: return; undoStack.addLast(a); applyHide(a.first, a.second) }
+    fun restoreAll() { if (hidden.isEmpty()) return; val all = hidden.toSet(); undoStack.addLast(false to all); redoStack.clear(); applyHide(false, all) }
     /** À l'ouverture d'une fiche sans résumé : va chercher la page de l'histoire et complète (résumé, mots, chapitres). */
     fun ensureDetails(w: Work) {
         if ((w.summary.isNotBlank() && !badTitle(w.title)) || !detailing.add(w.id)) return

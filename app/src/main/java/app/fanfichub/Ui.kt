@@ -292,7 +292,7 @@ fun SiteChips(hub: Hub) {
     }
 }
 
-fun Hub.visible() = works.filter { site == "ALL" || it.site == site }
+fun Hub.visible() = works.filter { (site == "ALL" || it.site == site) && it.id !in hidden }
 
 /** Bandeau de synchronisation, visible sur tous les onglets. */
 @Composable
@@ -435,7 +435,10 @@ fun Library(hub: Hub) {
     val filters = listOf("Tout", "En cours", "Nouveautés", "Terminées", "Hors ligne")
     val site = hub.site ?: "ALL"
     // Calculs mémorisés : ne se refont que si les données ou les filtres changent.
-    val visible = remember(hub.works.size, hub.syncing, site, hub.stack.size) { hub.visible() }
+    val visible = remember(hub.works.size, hub.syncing, site, hub.stack.size, hub.hidden.size) { hub.visible() }
+    var selecting by remember { mutableStateOf(false) }
+    val sel = remember { mutableStateListOf<String>() }
+    fun open(w: Work) { if (selecting) { if (w.id in sel) sel.remove(w.id) else sel.add(w.id) } else hub.push(Screen.Detail(w.id)) }
     val shelves = remember(visible) {
         if (site == "ALL") visible.groupBy { it.site }.map { (k, v) -> k to v }.sortedByDescending { it.second.size }
         else if (site == "AO3" || site == "FanFiction.net") visible.groupBy { fandomKey(it) }.map { (k, v) -> k to v }.sortedByDescending { it.second.size }
@@ -463,7 +466,28 @@ fun Library(hub: Hub) {
                     Text(col?.let { collectionName(it) } ?: if (site == "ALL") "Tout" else site, color = Txt, fontSize = 30.sp, fontWeight = FontWeight.Bold,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                CircleIcon(Icons.Default.Search) { searching = !searching; if (!searching) q = "" }
+                if (!selecting) CircleIcon(Icons.Default.Search) { searching = !searching; if (!searching) q = "" }
+                Spacer(Modifier.width(8.dp))
+                CircleIcon(if (selecting) Icons.Default.Close else Icons.Default.Delete) { selecting = !selecting; sel.clear() }
+            }
+        }
+        // Mode sélection : tout sélectionner / supprimer ; annuler, rétablir, tout restaurer
+        if (selecting) item {
+            Row(Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                FilterPill("Tout (${(if (col != null || searching || f != 0) list else visible).size})", false) {
+                    val all = (if (col != null || searching || f != 0) list else visible).map { it.id }
+                    if (sel.size >= all.size) sel.clear() else { sel.clear(); sel.addAll(all) } }
+                Spacer(Modifier.weight(1f))
+                Text("Supprimer (${sel.size})", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clip(CircleShape).background(if (sel.isEmpty()) SolidColor(Surf2) else SolidColor(Color(0xFFE5484D)))
+                        .clickable(enabled = sel.isNotEmpty()) { hub.hide(sel.toSet()); sel.clear() }.padding(horizontal = 16.dp, vertical = 9.dp))
+            }
+        }
+        if (hub.canUndo || hub.canRedo || hub.hidden.isNotEmpty()) item {
+            Row(Modifier.padding(start = 20.dp, end = 20.dp, top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (hub.canUndo) FilterPill("↶ Annuler", false) { hub.undo() }
+                if (hub.canRedo) FilterPill("↷ Rétablir", false) { hub.redo() }
+                if (hub.hidden.isNotEmpty()) FilterPill("Tout restaurer (${hub.hidden.size})", false) { hub.restoreAll() }
             }
         }
         item { SiteChips(hub) }
@@ -490,15 +514,18 @@ fun Library(hub: Hub) {
             item { Spacer(Modifier.height(16.dp)) }
             if (shelves.isEmpty()) item { Empty("Vide. Configure un compte.") }
             items(shelves, key = { it.first }) { (k, v) ->
-                BookShelf(if (site == "ALL") k else collectionName(k), v, onAll = { col = k }) { w -> hub.push(Screen.Detail(w.id)) }
+                BookShelf(if (site == "ALL") k else collectionName(k), v, onAll = { col = k }, isSel = { it.id in sel }) { w -> open(w) }
             }
         } else if (gridMode) {
             item { Spacer(Modifier.height(8.dp)) }
-            items(list.chunked(12), key = { it.first().id }) { part -> BookRows(part) { w -> hub.push(Screen.Detail(w.id)) } }
+            items(list.chunked(12), key = { it.first().id }) { part -> BookRows(part, isSel = { it.id in sel }) { w -> open(w) } }
         } else {
             if (list.isEmpty()) item { Empty("Aucune fanfiction ici.") }
             items(list, key = { it.id }) { w ->
-                WorkCard(w, Modifier.padding(horizontal = 20.dp, vertical = 6.dp).animateItem()) { hub.push(Screen.Detail(w.id)) }
+                Box(Modifier.animateItem()) {
+                    WorkCard(w, Modifier.padding(horizontal = 20.dp, vertical = 6.dp)) { open(w) }
+                    if (w.id in sel) SelMark(Modifier.align(Alignment.TopEnd).padding(14.dp))
+                }
             }
         }
     }
