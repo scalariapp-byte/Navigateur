@@ -583,9 +583,28 @@ private fun Switch(on: Boolean) {
 
 @Composable
 fun Accounts(hub: Hub) {
+    var page by remember { mutableStateOf<String?>(null) }
+    BackHandler(enabled = page != null) { page = null }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 130.dp)) {
-        Title("COMPTES", "Réglages")
-        Group("Comptes") {
+        Title("", page ?: "Réglages")
+        // Réglages en pages : un menu qui tient sur l'écran, chaque rubrique s'ouvre à part
+        if (page == null) {
+            val tiles = listOf("Comptes" to Icons.Default.Person, "Synchronisation" to Icons.Default.Refresh, "Apparence" to Icons.Default.Star, "Commentaires & messages" to Icons.Default.Email, "Extensions" to Icons.Default.Add, "Application" to Icons.Default.Info)
+            tiles.chunked(2).forEach { row ->
+                Row(Modifier.padding(horizontal = 16.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    row.forEach { (n, icon) ->
+                        Column(Modifier.weight(1f).height(108.dp).clip(RoundedCornerShape(22.dp)).background(Surf).clickable { page = n }.padding(16.dp),
+                            verticalArrangement = Arrangement.SpaceBetween) {
+                            RoundIcon(icon)
+                            Text(n, color = Txt, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                    if (row.size == 1) Spacer(Modifier.weight(1f))
+                }
+            }
+        } else Text("‹ Réglages", color = A1, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(start = 12.dp, top = 6.dp).clip(CircleShape).clickable { page = null }.padding(10.dp))
+        if (page == "Comptes") Group("Comptes") {
             SITE_UI.forEachIndexed { i, s ->
                 if (i > 0) Line()
                 val acc = hub.account(s.name)
@@ -595,7 +614,7 @@ fun Accounts(hub: Hub) {
                     subColor = when { st?.startsWith("Erreur") == true -> Color(0xFFEF4444); acc != null -> s.color; else -> Mut }) { hub.push(Screen.Setup(s.name)) }
             }
         }
-        Group("Synchronisation") {
+        if (page == "Synchronisation") Group("Synchronisation") {
             // État en direct : étape en cours + résultat par site
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
                 Text(if (hub.syncing) "En cours" else "À l'arrêt", color = if (hub.syncing) A1 else Mut, fontSize = 13.sp, fontWeight = FontWeight.Bold)
@@ -614,7 +633,7 @@ fun Accounts(hub: Hub) {
             Line()
             SettingRow({ RoundIcon(Icons.Default.Refresh, A2) }, "Synchronisation complète") { hub.startSync(full = true) }
         }
-        Group("Apparence") {
+        if (page == "Apparence") Group("Apparence") {
             Row(Modifier.padding(14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 listOf(Triple("Noir", Color.Black, Color(0xFFF4F4F8)), Triple("Sombre", Color(0xFF17171F), Color(0xFFF4F4F8)), Triple("Clair", Color(0xFFF5F5F8), Color(0xFF15151B)))
                     .forEachIndexed { i, (name, bg, fg) ->
@@ -630,17 +649,17 @@ fun Accounts(hub: Hub) {
             SettingRow({ RoundIcon(Icons.Default.Star) }, "Animation du livre", trail = { Switch(hub.bookAnim) }) { hub.toggleBookAnim(!hub.bookAnim) }
         }
         // Commentaires et messages : pages officielles des sites (connexion du navigateur intégré), sans mise en page de lecture
-        Group("Commentaires & messages") {
+        if (page == "Commentaires & messages") Group("Commentaires & messages") {
             listOf("AO3" to "https://archiveofourown.org/users/${hub.user ?: "login"}/inbox", "Wattpad" to "https://www.wattpad.com/notifications",
                 "FanFiction.net" to "https://www.fanfiction.net/pm2/inbox.php", "Spirit Fanfics" to "https://www.spiritfanfiction.com/notificacoes")
                 .filter { Ext.on(it.first) }.forEach { (n, u) ->
                     SettingRow({ SiteLogo(n, 40) }, n, "Commentaires, réponses, messages") { hub.push(Screen.Web(u, "$n · messages", reader = false)) }
                 }
         }
-        Group("Extensions") {
+        if (page == "Extensions") Group("Extensions") {
             SettingRow({ RoundIcon(Icons.Default.Add) }, "Extensions", "${Ext.enabled.size} sites · ${Ext.installed.size} de la communauté") { hub.push(Screen.Extensions) }
         }
-        Group("Application") {
+        if (page == "Application") Group("Application") {
             SettingRow({ RoundIcon(Icons.Default.Info) }, "Version ${hub.version}",
                 if (hub.newVersion != null) "Version ${hub.newVersion} disponible" else "Touche pour vérifier",
                 trail = { if (hub.newVersion != null) FilterPill(hub.updating?.let { "${(it * 100).toInt()} %" } ?: "Mettre à jour", true) { hub.startUpdate() } }) {
