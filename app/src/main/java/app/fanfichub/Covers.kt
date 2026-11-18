@@ -179,7 +179,7 @@ fun fandomKey(w: Work): String {
 }
 
 fun collectionName(src: String) = when (src) {
-    "Favori" -> "Favoris"; "À lire" -> "À lire plus tard"; "Abonnement" -> "Abonnements"; "Ajouté" -> "Ajoutées par lien"
+    "Favori" -> "Favoris"; "À lire" -> "À lire plus tard"; "Abonnement" -> "Abonnements"; "Ajouté" -> "Ajoutées"
     else -> src.removePrefix("Liste : ")
 }
 
