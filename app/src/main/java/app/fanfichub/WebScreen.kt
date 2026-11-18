@@ -105,6 +105,7 @@ private const val TR_JS = """(function(){
 var w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT,{acceptNode:function(n){
  var p=n.parentNode&&n.parentNode.nodeName;return n.nodeValue.trim().length>1&&!n.__fh&&p!=='SCRIPT'&&p!=='STYLE'&&p!=='NOSCRIPT'?1:3}});
 var a=[],n;while((n=w.nextNode())&&a.length<3000)a.push(n);window.__fhNodes=a;
+window.fhApplyPart=function(ix,t){ix.forEach(function(i,k){var x=window.__fhNodes[i];if(x&&t[k]){x.nodeValue=t[k];x.__fh=1}})};
 window.fhApply=function(t){t.forEach(function(s,i){var x=window.__fhNodes[i];if(x&&s){x.nodeValue=s;x.__fh=1}})};
 FH.batch(JSON.stringify(a.map(function(x){return x.nodeValue})));})()"""
 
@@ -197,7 +198,10 @@ fun WebScreen(hub: Hub, url: String, title: String) {
                         hub.scope.launch {
                             try {
                                 val a = JSONArray(json); val items = (0 until a.length()).map { a.getString(it) }
-                                val res = Translator.texts(items) { p -> tr = "${(p * 100).toInt()} %" }
+                                val res = Translator.texts(items, { p -> tr = "${(p * 100).toInt()} %" }) { ix, tx ->
+                                    // Chaque morceau traduit s'affiche tout de suite (le haut de la page en premier)
+                                    view.post { view.evaluateJavascript("fhApplyPart(" + JSONArray(ix).toString() + "," + JSONArray(tx).toString() + ")", null) }
+                                }
                                 view.evaluateJavascript("fhApply(" + JSONArray(res).toString() + ")", null)
                                 tr = "FR"
                             } catch (e: Exception) { tr = null; hub.status = "Traduction indisponible pour le moment, réessaie dans un instant" }

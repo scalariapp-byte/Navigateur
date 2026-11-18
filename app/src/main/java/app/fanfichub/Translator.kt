@@ -59,13 +59,13 @@ object Translator {
     }
 
     /** Traduit une liste de textes ; lots de ~4 500 caractères envoyés 4 par 4 en parallèle ; cache mémoire. */
-    suspend fun texts(items: List<String>, progress: (Float) -> Unit = {}): List<String> = coroutineScope {
+    suspend fun texts(items: List<String>, progress: (Float) -> Unit = {}, onPart: (List<Int>, List<String>) -> Unit = { _, _ -> }): List<String> = coroutineScope {
         val src = items.map { it.replace(Regex("\\s+"), " ").trim() }
         val out = src.map<String, String?> { if (it.isEmpty()) it else null }.toMutableList()
         val todo = src.indices.filter { out[it] == null }
         val groups = mutableListOf<List<Int>>(); var cur = mutableListOf<Int>(); var len = 0
         for (i in todo) {
-            if (cur.isNotEmpty() && len + src[i].length > 4500) { groups += cur; cur = mutableListOf(); len = 0 }
+            if (cur.isNotEmpty() && len + src[i].length > (if (groups.isEmpty()) 1200 else 4500)) { groups += cur; cur = mutableListOf(); len = 0 }
             cur += i; len += src[i].length + 2
         }
         if (cur.isNotEmpty()) groups += cur
@@ -79,6 +79,7 @@ object Translator {
                         if (res.size == g.size) g.forEachIndexed { k, i -> out[i] = res[k].trim() }
                         else g.forEach { i -> out[i] = runCatching { google(src[i]).trim() }.getOrDefault(src[i]); kotlinx.coroutines.delay(150) }
                     }.onFailure { failed++ }
+                    onPart(g, g.map { out[it] ?: src[it] }) // affichage au fil de l'eau
                     done += g.size; progress(done.toFloat() / maxOf(1, todo.size))
                 }
             }
