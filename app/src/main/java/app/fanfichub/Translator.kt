@@ -83,6 +83,7 @@ object Translator {
                 }
             }
         }.awaitAll()
+        if (groups.isNotEmpty() && failed == groups.size) error("Google refuse pour le moment")
         src.indices.map { out[it] ?: src[it] }
     }
 
