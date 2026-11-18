@@ -497,7 +497,7 @@ object Ffn : Site {
         }
         t = t.replace(title, " ")
         box.select("a[href^=/u/]").forEach { t = t.replace("by " + it.text(), " ").replace(it.text(), " ") }
-        return t.replace(Regex("\\s+"), " ").trim().replace(Regex("^(\\d[\\d,.]*\\s*)?[»·\\-\\s]*"), "").trim().takeIf { it.length > 20 } ?: ""
+        return t.replace(Regex("\\s+"), " ").trim().replace(Regex("^.{0,15}?»\\s*"), "").replace(Regex("^(\\d[\\d,.]*\\s*)?[»·\\-\\s]*"), "").trim().takeIf { it.length > 20 } ?: ""
     }
     private fun metaDesc(d: Document) = (d.selectFirst("meta[name=description]")?.attr("content") ?: d.selectFirst("meta[property=og:description]")?.attr("content") ?: "").trim()
 
