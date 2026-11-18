@@ -341,8 +341,16 @@ object Wattpad : Site {
     suspend fun listWorks(id: String): List<Work> = listStories(id).map { work(it).copy(sources = setOf("Recherche")) }
 
     override suspend fun probe(user: String): String {
-        val a = JSONObject(json("$B/api/v3/users/${enc(user)}/library?limit=2&fields=stories(id,title,description)", "ui")).optJSONArray("stories") ?: JSONArray()
-        return "  sonde bibliothèque : " + (0 until a.length()).joinToString(" ; ") { a.getJSONObject(it).let { o -> "${o.optString("title").take(30)} → « ${o.optString("description").take(60)} »" } }
+        val sb = StringBuilder()
+        for ((n, u) in listOf("bibliothèque" to "$B/api/v3/users/${enc(user)}/library?limit=2&fields=stories(id,title)",
+                "listes" to "$B/api/v3/users/${enc(user)}/lists?limit=100&fields=lists(id,name,numStories)")) {
+            val t0 = System.currentTimeMillis()
+            val r = runCatching { json(u, "ui") }.getOrElse { "ERREUR ${it.message}" }
+            sb.append("  sonde $n (${System.currentTimeMillis() - t0} ms) : ${r.replace(Regex("\\s+"), " ").take(220)}\n")
+        }
+        runCatching { lists(enc(user)).firstOrNull() }.getOrNull()?.let { (id, name) ->
+            sb.append("  1re liste « $name » : ${runCatching { listStories(id).size }.getOrElse { -1 }} histoires lues\n") }
+        return sb.toString()
     }
 
     // ---- Compte Wattpad : listes de lecture (session du navigateur intégré)
