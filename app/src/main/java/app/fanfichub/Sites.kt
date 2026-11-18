@@ -155,7 +155,7 @@ object Wattpad : Site {
                 if (r != null && (r.statusCode() == 429 || r.statusCode() == 503)) { kotlinx.coroutines.delay(800L shl attempt); continue }
                 direct = r?.body()?.trim()?.takeIf { r.statusCode() == 200 }; break
             }
-            val isError = direct != null && Regex("^\\{\\s*\"(error|error_type|code|message)\"").containsMatchIn(direct)
+            val isError = direct != null && Regex("^\\{\\s*\"(error|error_type|error_code|code|message)\"").containsMatchIn(direct)
             if (direct != null && !isError && (direct.startsWith("{") || direct.startsWith("["))) return direct
         }
         return slowJson(u, lane)
@@ -240,8 +240,10 @@ object Wattpad : Site {
         }
         coroutineScope {
             // 3 listes à la fois : au-delà, Wattpad freine et des listes entières étaient perdues
-            val gate = Semaphore(3)
-            runCatching { lists(u) }.getOrDefault(emptyList()).map { (id, name) -> async { gate.withPermit { name to runCatching { listStories(id) }.getOrDefault(emptyList()) } } }
+            // 2 listes à la fois, 3 essais par liste : Wattpad freine les rafales
+            val gate = Semaphore(2)
+            suspend fun read(id: String): List<JSONObject> { repeat(3) { k -> runCatching { return listStories(id) }; kotlinx.coroutines.delay(2000L * (k + 1)) }; return emptyList() }
+            runCatching { lists(u) }.getOrDefault(emptyList()).map { (id, name) -> async { gate.withPermit { name to read(id) } } }
                 .awaitAll().forEach { (name, st) -> st.forEach { put(work(it).copy(sources = setOf("Liste : $name"))) } }
         }
         return out.values.toList()
