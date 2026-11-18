@@ -584,27 +584,6 @@ fun Accounts(hub: Hub) {
             Line()
             SettingRow({ RoundIcon(Icons.Default.Star) }, "Animation du livre", trail = { Switch(hub.bookAnim) }) { hub.toggleBookAnim(!hub.bookAnim) }
         }
-        Group("Lecture") {
-            Row(Modifier.padding(14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                THEMES.forEachIndexed { i, (name, bg, fg) ->
-                    Column(Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).background(Color(bg))
-                        .border(2.dp, if (hub.theme == i) A1 else Color.Gray.copy(alpha = 0.25f), RoundedCornerShape(14.dp)).clickable { hub.setReader(t = i) }.padding(vertical = 12.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("Aa", color = Color(fg), fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                        Text(name, color = Color(fg).copy(alpha = 0.7f), fontSize = 11.sp)
-                    }
-                }
-            }
-            Line()
-            SettingRow({ RoundIcon(Icons.Default.Info, A2) }, "Traduction automatique", trail = { Switch(hub.autoTr) }) { hub.toggleAutoTr(!hub.autoTr) }
-            Line()
-            Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Taille du texte", color = Txt, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                Text("A−", color = Txt, fontSize = 17.sp, modifier = Modifier.clip(CircleShape).clickable { hub.setReader(s = hub.size - 1) }.padding(12.dp))
-                Text("${hub.size}", color = Mut, fontSize = 15.sp, modifier = Modifier.padding(horizontal = 4.dp))
-                Text("A+", color = Txt, fontSize = 21.sp, modifier = Modifier.clip(CircleShape).clickable { hub.setReader(s = hub.size + 1) }.padding(12.dp))
-            }
-        }
         Group("Application") {
             SettingRow({ RoundIcon(Icons.Default.Info) }, "Version ${hub.version}",
                 if (hub.newVersion != null) "Version ${hub.newVersion} disponible" else "Touche pour vérifier",
@@ -826,4 +805,31 @@ fun Detail(hub: Hub, id: String) {
         }
         CircleIcon(Icons.AutoMirrored.Filled.ArrowBack, Modifier.statusBarsPadding().padding(14.dp)) { hub.pop() }
     }
+}
+
+
+/** Réglages de lecture (thème, traduction automatique, taille) : affichés pendant la lecture, plus dans Réglages. */
+@Composable
+fun ReadingSettings(hub: Hub) {
+    Column {
+            Row(Modifier.padding(14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                THEMES.forEachIndexed { i, (name, bg, fg) ->
+                    Column(Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).background(Color(bg))
+                        .border(2.dp, if (hub.theme == i) A1 else Color.Gray.copy(alpha = 0.25f), RoundedCornerShape(14.dp)).clickable { hub.setReader(t = i) }.padding(vertical = 12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("Aa", color = Color(fg), fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        Text(name, color = Color(fg).copy(alpha = 0.7f), fontSize = 11.sp)
+                    }
+                }
+            }
+            Line()
+            SettingRow({ RoundIcon(Icons.Default.Info, A2) }, "Traduction automatique", trail = { Switch(hub.autoTr) }) { hub.toggleAutoTr(!hub.autoTr) }
+            Line()
+            Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Taille du texte", color = Txt, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Text("A−", color = Txt, fontSize = 17.sp, modifier = Modifier.clip(CircleShape).clickable { hub.setReader(s = hub.size - 1) }.padding(12.dp))
+                Text("${hub.size}", color = Mut, fontSize = 15.sp, modifier = Modifier.padding(horizontal = 4.dp))
+                Text("A+", color = Txt, fontSize = 21.sp, modifier = Modifier.clip(CircleShape).clickable { hub.setReader(s = hub.size + 1) }.padding(12.dp))
+            }
+            }
 }
