@@ -207,7 +207,7 @@ class Hub(ctx: Context) {
             val mine = works.filter { it.site == site.name }
             val noSum = mine.filter { it.summary.isBlank() }
             r.append("\n== ${site.name} · dernière synchro : ${siteStatus[site.name] ?: "pas encore lancée depuis l'ouverture de l'app"}")
-            r.append("\n== ${site.name} · compte ${account(site.name) ?: "aucun"} · ${mine.size} fiches · sans résumé ${noSum.size} · sans couverture ${mine.count { !goodCover(it.cover) }} · titres-identifiants ${mine.count { Regex("^[a-z0-9-]+-\\d+$").matches(it.title) }}\n")
+            r.append("\n== ${site.name} · compte ${account(site.name) ?: "aucun"} · ${mine.size} fiches · sans résumé ${noSum.size} · sans couverture ${mine.count { !goodCover(it.cover) }} (vide ${mine.count { it.cover.isBlank() }}, doublon ${mine.count { it.cover.isNotBlank() && it.cover in dupCovers }}) · titres-identifiants ${mine.count { Regex("^[a-z0-9-]+-\\d+$").matches(it.title) }}\n")
             noSum.take(2).forEach { w ->
                 val t0 = System.currentTimeMillis()
                 val inf = kotlinx.coroutines.withTimeoutOrNull(30_000) { runCatching { site.info(w.link, "ui") }.getOrElse { e -> r.append("  ! ${w.title.take(40)} : ${e.message}\n"); null } }

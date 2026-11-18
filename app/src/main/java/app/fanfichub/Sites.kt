@@ -471,6 +471,11 @@ object Ffn : Site {
             val meta = box.selectFirst(".gray, .xgray, .z-padtop2")?.text() ?: ""
             sb.append("   - ${a.text().take(40)} → résumé « ${ffnSummary(box, a.text(), meta).take(90)} »\n     bloc : ${box.outerHtml().replace(Regex("\\s+"), " ").take(400)}\n")
         }
+        runCatching { Web.html("$B/u/$uid/", "pc") }.onSuccess { pc ->
+            val z = pc.select("div.z-list[data-storyid]")
+            sb.append("  version ordinateur : « ${pc.title().take(40)} » · fiches ${z.size} · avec image ${z.count { img(it.selectFirst("img")).isNotBlank() }}\n")
+            z.firstOrNull { img(it.selectFirst("img")).isBlank() }?.let { sb.append("     sans image : ${it.outerHtml().replace(Regex("\\s+"), " ").take(300)}\n") }
+        }.onFailure { sb.append("  version ordinateur : échec ${it.message}\n") }
         val s = d.selectFirst("a[href^=/s/]")?.attr("href")?.let { Regex("^/s/(\\d+)").find(it)?.groupValues?.get(1) }
         if (s != null) { val p = Web.html("$M/s/$s/1/", "ui")
             sb.append("  page histoire : « ${p.title().take(50)} » · meta « ${metaDesc(p).take(90)} » · #profile_top ${p.select("#profile_top").size}\n     haut : ${p.body()?.text()?.take(300)}\n") }
