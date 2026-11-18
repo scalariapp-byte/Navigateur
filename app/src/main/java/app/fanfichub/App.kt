@@ -200,10 +200,13 @@ class Hub(ctx: Context) {
         val out = StringBuffer()
         fun log(s: String) { out.append(s).append('\n') }
         log("Fanfic Hub v$version · Android ${android.os.Build.VERSION.RELEASE} · ${android.os.Build.MODEL}")
+        val ls = prefs.getLong("lastSync", 0)
+        log("Dernière synchro complète : " + if (ls == 0L) "jamais" else "il y a ${(System.currentTimeMillis() - ls) / 60000} min" + if (syncing) " · synchro en cours" else "")
         val reports = Sites.all.map { site -> async(Dispatchers.IO) {
             val r = StringBuilder()
             val mine = works.filter { it.site == site.name }
             val noSum = mine.filter { it.summary.isBlank() }
+            r.append("\n== ${site.name} · dernière synchro : ${siteStatus[site.name] ?: "pas encore lancée depuis l'ouverture de l'app"}")
             r.append("\n== ${site.name} · compte ${account(site.name) ?: "aucun"} · ${mine.size} fiches · sans résumé ${noSum.size} · sans couverture ${mine.count { !goodCover(it.cover) }} · titres-identifiants ${mine.count { Regex("^[a-z0-9-]+-\\d+$").matches(it.title) }}\n")
             noSum.take(2).forEach { w ->
                 val t0 = System.currentTimeMillis()
@@ -461,6 +464,11 @@ class Hub(ctx: Context) {
     /** Couvertures préchargées en arrière-plan : les étagères s'affichent sans attendre. */
     fun prefetchCovers() { scope.launch { Img.prefetch(works.sortedByDescending { it.lastRead }.map { it.cover }) } }
 
+    /** Vrai une seule fois après l'installation d'une nouvelle version. */
+    fun firstRunOfVersion(): Boolean {
+        if (prefs.getLong("ranVersion", 0) == version) return false
+        prefs.edit().putLong("ranVersion", version).apply(); return true
+    }
     fun syncDue(minutes: Int = 20) = (user != null || users.isNotEmpty()) && System.currentTimeMillis() - prefs.getLong("lastSync", 0) > minutes * 60_000L
 }
 
@@ -494,7 +502,8 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         if (!::hub.isInitialized) return
-        if (::hub.isInitialized) { hub.reload(); hub.startCheck(); if (hub.syncDue(2)) hub.startSync(quick = true) }
+        if (::hub.isInitialized) { hub.reload(); hub.startCheck()
+            if (hub.firstRunOfVersion()) hub.startSync() else if (hub.syncDue(2)) hub.startSync(quick = true) }
     }
     override fun onPause() { super.onPause(); if (::hub.isInitialized) runCatching { hub.flush() } }
 
