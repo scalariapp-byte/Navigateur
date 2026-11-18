@@ -399,7 +399,7 @@ class Hub(ctx: Context) {
                 fun noSummary(w: Work) = w.summary.isBlank() && old[w.id]?.summary.isNullOrBlank() && !(quick && (old[w.id]?.let { now - it.checked < 3 * 3_600_000L } == true))
                 fun slugTitle(w: Work) = badTitle(w.title)
                 // La page mobile FF.net n'a pas de résumé (il vient de la liste des favoris) : inutile d'y aller pour ça.
-                val wantSummary = s.name != "FanFiction.net"
+                val wantSummary = true
                 val targets = (seen.values.filter { it.site == s.name && (it.chapters.startsWith("?") || (wantSummary && noSummary(it)) || slugTitle(old[it.id] ?: it)) } +
                     old.values.filter { it.site == s.name && it.id !in seen && (full || !it.complete) && !fresh(it) }).distinctBy { it.id }.take(80)
                 targets.forEachIndexed { i, w ->
