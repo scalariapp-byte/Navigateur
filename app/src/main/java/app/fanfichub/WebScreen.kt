@@ -65,7 +65,7 @@ private const val READ_JS = """(function(){var s=document.getElementById('fhread
 'blockquote{margin:0 0 1em!important;padding:0 0 0 10px!important}.preface,.notes,.summary{padding:0 14px!important}'+
 'p.jump{display:none!important}.fhfold{display:none!important}.fhmore{color:#b9a7ff;font-size:14px;font-weight:bold;padding:6px 0 12px;cursor:pointer}';
 if(!s.parentNode)(document.head||document.documentElement).appendChild(s);
-document.querySelectorAll('.notes').forEach(function(n){if(!n.querySelector('blockquote')&&n.querySelector('p.jump'))n.style.display='none'});
+document.querySelectorAll('.notes,.chapter .preface .notes,div[id=notes]').forEach(function(n){var t=(n.innerText||'');if(!n.querySelector('blockquote')||/end of the chapter|fin du chapitre|end of the work/i.test(t)&&t.length<120)n.style.display='none'});
 // Résumé et notes repliés : « Tout afficher » pour déplier
 document.querySelectorAll('.preface .summary blockquote,.preface .notes blockquote,#work_endnotes blockquote,.end.notes blockquote,[class*=notas]').forEach(function(b){
  if(b.__fh)return;b.__fh=1;b.classList.add('fhfold');var m=document.createElement('div');m.className='fhmore';m.textContent='Afficher ▾';
@@ -171,7 +171,7 @@ fun WebScreen(hub: Hub, url: String, title: String) {
                 if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) WebSettingsCompat.setAlgorithmicDarkeningAllowed(settings, true)
                 webViewClient = object : WebViewClient() {
                     override fun shouldOverrideUrlLoading(v: WebView, r: WebResourceRequest) = !r.url.scheme.orEmpty().startsWith("http")
-                    override fun doUpdateVisitedHistory(v: WebView, u: String?, reload: Boolean) { canBack = v.canGoBack() }
+                    override fun doUpdateVisitedHistory(v: WebView, u: String?, reload: Boolean) { canBack = v.canGoBack(); v.evaluateJavascript(readJs(hub), null) }
                     // Pubs et traqueurs bloqués : pages bien plus rapides
                     override fun shouldInterceptRequest(v: WebView, r: WebResourceRequest): android.webkit.WebResourceResponse? {
                         val h = r.url.host.orEmpty()
@@ -181,6 +181,7 @@ fun WebScreen(hub: Hub, url: String, title: String) {
                     override fun onPageCommitVisible(v: WebView, u: String?) { v.evaluateJavascript(readJs(hub), null) }
                     override fun onPageFinished(v: WebView, u: String?) {
                         v.evaluateJavascript(readJs(hub), null); v.evaluateJavascript(CLEAN_JS, null)
+                        v.postDelayed({ v.evaluateJavascript(readJs(hub), null) }, 1500)
                         if ((hub.webFr || hub.autoTr) && tr != "0 %") { tr = "0 %"; v.post { v.evaluateJavascript(TR_JS, null) } }
                     }
                 }

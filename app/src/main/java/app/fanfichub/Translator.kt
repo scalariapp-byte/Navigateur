@@ -69,13 +69,16 @@ object Translator {
             cur += i; len += src[i].length + 2
         }
         if (cur.isNotEmpty()) groups += cur
-        val sem = Semaphore(2); var done = 0
+        val sem = Semaphore(2); var done = 0; var failed = 0
         groups.map { g ->
             async {
                 sem.withPermit {
-                    val res = google(g.joinToString("\n\n") { src[it] }).split(Regex("\n\\s*\n"))
-                    if (res.size == g.size) g.forEachIndexed { k, i -> out[i] = res[k].trim() }
-                    else g.forEach { i -> out[i] = google(src[i]).trim(); kotlinx.coroutines.delay(150) }
+                    // Un morceau refusé par Google reste en VO : le reste de la page est quand même traduit
+                    runCatching {
+                        val res = google(g.joinToString("\n\n") { src[it] }).split(Regex("\n\\s*\n"))
+                        if (res.size == g.size) g.forEachIndexed { k, i -> out[i] = res[k].trim() }
+                        else g.forEach { i -> out[i] = runCatching { google(src[i]).trim() }.getOrDefault(src[i]); kotlinx.coroutines.delay(150) }
+                    }.onFailure { failed++ }
                     done += g.size; progress(done.toFloat() / maxOf(1, todo.size))
                 }
             }
