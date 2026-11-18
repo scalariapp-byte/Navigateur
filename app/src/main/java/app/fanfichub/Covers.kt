@@ -6,6 +6,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.border
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -71,9 +72,9 @@ fun NetImage(url: String, size: Int) {
 }
 
 @Composable
-fun NetFill(url: String, modifier: Modifier = Modifier) {
+fun NetFill(url: String, modifier: Modifier = Modifier, alignment: Alignment = Alignment.Center) {
     val bmp by produceState(Img.cached(url), url) { if (value == null) value = Img.load(url) }
-    bmp?.let { Image(it, null, modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
+    bmp?.let { Image(it, null, modifier.fillMaxSize(), contentScale = ContentScale.Crop, alignment = alignment) }
 }
 
 /** Écarte les images par défaut (bulle FanFiction.net, avatars) : seule une vraie couverture d'histoire est affichée. */
@@ -96,7 +97,8 @@ fun BookCover(w: Work, width: Int, modifier: Modifier = Modifier) {
             Spacer(Modifier.weight(1f))
             Text(w.author, color = Color.White.copy(alpha = 0.75f), fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        if (goodCover(w.cover)) NetFill(w.cover)
+        if (goodCover(w.cover) && w.site == "Spirit Fanfics") SpiritFace(w, width)
+        else if (goodCover(w.cover)) NetFill(w.cover)
         // Reliure + reflet
         Box(Modifier.fillMaxHeight().width(5.dp).background(Brush.horizontalGradient(listOf(Color.Black.copy(alpha = 0.35f), Color.Transparent))))
         if (w.newChapters > 0) Text("+${w.newChapters}", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Black,
@@ -104,6 +106,26 @@ fun BookCover(w: Work, width: Int, modifier: Modifier = Modifier) {
         if (w.progress > 0.01f) Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(4.dp).background(Color.Black.copy(alpha = 0.5f))) {
             Box(Modifier.fillMaxWidth(w.progress.coerceIn(0f, 1f)).fillMaxHeight().background(Grad))
         }
+    }
+}
+
+/**
+ * Spirit fournit des images en paysage : au lieu de les rogner en portrait, couverture rigide sombre
+ * avec l'illustration encadrée en haut, puis le titre et l'auteur (style édition prestige).
+ */
+@Composable
+private fun SpiritFace(w: Work, width: Int) {
+    val board = boardColor(fandomColor(w.fandom))
+    val gold = Color(0xFFD9C08A)
+    Column(Modifier.fillMaxSize().background(board).padding(start = 7.dp, end = 5.dp, top = 7.dp, bottom = 6.dp)) {
+        Box(Modifier.fillMaxWidth().aspectRatio(1.45f).border(1.dp, gold.copy(alpha = 0.6f)).padding(2.dp)) { NetFill(w.cover) }
+        Box(Modifier.padding(top = 5.dp).align(Alignment.CenterHorizontally).size(width = (width * 0.3f).dp, height = 1.dp).background(gold.copy(alpha = 0.7f)))
+        Text(w.title, color = Color(0xFFF2EEE8), fontSize = (width / 9f).coerceIn(9f, 13f).sp, lineHeight = (width / 7.5f).coerceIn(11f, 16f).sp,
+            fontFamily = androidx.compose.ui.text.font.FontFamily.Serif, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+        Spacer(Modifier.weight(1f))
+        Text(w.author.uppercase(), color = gold, fontSize = 7.sp, letterSpacing = 1.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.fillMaxWidth())
     }
 }
 
