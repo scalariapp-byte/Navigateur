@@ -91,6 +91,21 @@ function clean(){
 clean();if(!window.__fhObs){window.__fhObs=new MutationObserver(function(){clearTimeout(window.__fhT);window.__fhT=setTimeout(clean,300)});
 window.__fhObs.observe(document.documentElement,{childList:true,subtree:true})}})()"""
 
+/** Outils de lecture : progression, toucher le centre = plein écran, défilement auto, chapitre suivant/précédent, lecture à voix haute. */
+private const val READER_JS = """(function(){if(window.__fhr)return;window.__fhr=1;
+function rep(){var h=document.documentElement,max=h.scrollHeight-innerHeight;var p=max>0?Math.min(1,scrollY/max):1;
+ var w=(document.body.innerText||'').split(/\s+/).length;FH.pos(p,Math.max(0,Math.round(w*(1-p)/230)))}
+addEventListener('scroll',function(){clearTimeout(window.__fht);window.__fht=setTimeout(rep,150)});setTimeout(rep,800);
+document.addEventListener('click',function(e){if(e.target.closest('a,button,input,textarea,select,label,.fhmore'))return;var y=e.clientY/innerHeight;if(y>0.25&&y<0.75)FH.tap()},true);
+window.fhAuto=function(v){clearInterval(window.__fha);if(v>0)window.__fha=setInterval(function(){scrollBy(0,v)},40)};
+window.fhNext=function(d){var re=d>0?/next|suivant|pr[óo]xim|continue|→|»/i:/prev|pr[ée]c[ée]dent|anterior|←|«/i;
+ var r=document.querySelector(d>0?'a[rel=next],li.chapter.next a':'a[rel=prev],li.chapter.previous a');
+ var c=r||[].slice.call(document.querySelectorAll('a[href],button')).filter(function(a){var t=(a.innerText||a.title||'').trim();return t&&t.length<40&&re.test(t)&&!/comment|review|kudos|page/i.test(t+(a.href||''))})[0];
+ if(!c){FH.none();return}if(c.tagName==='A')location.href=c.href;else c.click()};
+window.fhRead=function(){var ps=[].slice.call(document.querySelectorAll('p,[data-p-id]')).filter(function(p){var r=p.getBoundingClientRect();return r.bottom>0&&(p.innerText||'').trim().length>1});
+ FH.speak(JSON.stringify(ps.slice(0,120).map(function(p){return p.innerText.trim()})))};
+})()"""
+
 /** Liste des chapitres de la page (AO3 et FF.net : menu déroulant ; Wattpad et Spirit : liens). */
 private const val CHAP_JS = """(function(){var h=location.host,o=[],m;
 var sel=document.querySelector('#selected_id,#chap_select,select[name=chapter],select[name=chapters]');
@@ -121,6 +136,17 @@ fun WebScreen(hub: Hub, url: String, title: String, reader: Boolean = true) {
     var tr by remember { mutableStateOf<String?>(null) } // null = VO, "…" = en cours, "FR" = traduit
     BackHandler { if (canBack) web?.goBack() else hub.pop() }
     var sizing by remember { mutableStateOf(false) }
+    var immersive by remember { mutableStateOf(false) }
+    var readPct by remember { mutableStateOf(0f) }
+    var minsLeft by remember { mutableIntStateOf(0) }
+    var auto by remember { mutableIntStateOf(0) }
+    var speaking by remember { mutableStateOf(false) }
+    val posPrefs = remember { ctx.getSharedPreferences("pos", android.content.Context.MODE_PRIVATE) }
+    val tts = remember { mutableStateOf<android.speech.tts.TextToSpeech?>(null) }
+    DisposableEffect(Unit) {
+        tts.value = android.speech.tts.TextToSpeech(ctx) { }
+        onDispose { tts.value?.stop(); tts.value?.shutdown() }
+    }
     var chapList by remember { mutableStateOf<List<Pair<String, String>>?>(null) }
     chapList?.let { l -> androidx.compose.ui.window.Dialog(onDismissRequest = { chapList = null }) {
         androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxWidth().heightIn(max = 560.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(24.dp)).background(Surf).padding(vertical = 10.dp)) {
@@ -143,7 +169,7 @@ fun WebScreen(hub: Hub, url: String, title: String, reader: Boolean = true) {
         }
     }
     Column(Modifier.fillMaxSize().background(Bg)) {
-        Row(Modifier.statusBarsPadding().padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (!immersive) Row(Modifier.statusBarsPadding().padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             CircleIcon(Icons.AutoMirrored.Filled.ArrowBack) { if (canBack) web?.goBack() else hub.pop() }
             Text(title, color = Txt, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f).padding(horizontal = 12.dp))
@@ -162,7 +188,9 @@ fun WebScreen(hub: Hub, url: String, title: String, reader: Boolean = true) {
             CircleIcon(Icons.Default.Refresh) { tr = null; web?.reload() }
 
         }
-        Box(Modifier.fillMaxWidth().height(2.dp)) { if (progress in 1..99) Bar(progress / 100f, A1) }
+        if (immersive) Spacer(Modifier.statusBarsPadding())
+        Box(Modifier.fillMaxWidth().height(2.dp)) { if (progress in 1..99) Bar(progress / 100f, A1) else if (reader) Bar(readPct, A1.copy(alpha = 0.6f)) }
+        Box(Modifier.fillMaxSize()) {
         AndroidView(factory = { c ->
             WebView(c).apply {
                 setBackgroundColor(android.graphics.Color.BLACK)
@@ -184,12 +212,31 @@ fun WebScreen(hub: Hub, url: String, title: String, reader: Boolean = true) {
                     override fun onPageFinished(v: WebView, u: String?) {
                         v.evaluateJavascript(readJs(hub, reader), null); if (reader) v.evaluateJavascript(CLEAN_JS, null)
                         v.postDelayed({ v.evaluateJavascript(readJs(hub, reader), null) }, 1500)
+                        if (reader) {
+                            v.evaluateJavascript(READER_JS, null)
+                            if (auto > 0) v.evaluateJavascript("fhAuto($auto)", null)
+                            // Reprise là où tu t'étais arrêté sur cette page
+                            val p = posPrefs.getFloat(u ?: "", 0f)
+                            if (p in 0.02f..0.98f) v.postDelayed({ v.evaluateJavascript("scrollTo(0,(document.documentElement.scrollHeight-innerHeight)*$p)", null) }, 700)
+                        }
                         if (reader && (hub.webFr || hub.autoTr) && tr != "0 %") { tr = "0 %"; v.post { v.evaluateJavascript(TR_JS, null) } }
                     }
                 }
                 webChromeClient = object : WebChromeClient() { override fun onProgressChanged(v: WebView, p: Int) { progress = p } }
                 val view = this
                 addJavascriptInterface(object {
+                    @JavascriptInterface fun pos(p: Float, mins: Int) {
+                        hub.scope.launch { readPct = p; minsLeft = mins }
+                        view.post { view.url?.let { u -> posPrefs.edit().putFloat(u, p).apply() } }
+                    }
+                    @JavascriptInterface fun tap() { hub.scope.launch { immersive = !immersive } }
+                    @JavascriptInterface fun none() { hub.status = "Pas de chapitre dans ce sens" }
+                    @JavascriptInterface fun speak(json: String) {
+                        val a = JSONArray(json); val t = tts.value ?: return
+                        t.language = if (tr == "FR") java.util.Locale.FRENCH else java.util.Locale.ENGLISH
+                        t.stop(); (0 until a.length()).forEach { t.speak(a.getString(it), android.speech.tts.TextToSpeech.QUEUE_ADD, null, "p$it") }
+                        hub.scope.launch { speaking = true }
+                    }
                     @JavascriptInterface fun chapters(json: String) {
                         val a = JSONArray(json)
                         val l = (0 until a.length()).map { a.getJSONArray(it).let { x -> x.getString(0) to x.getString(1) } }
@@ -213,5 +260,19 @@ fun WebScreen(hub: Hub, url: String, title: String, reader: Boolean = true) {
                 web = this
             }
         }, modifier = Modifier.fillMaxSize().navigationBarsPadding())
+        // Barre de lecture : chapitre précédent/suivant, progression et temps restant, lecture à voix haute, défilement auto
+        if (reader && !immersive) Row(Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(12.dp).clip(CircleShape).background(Surf.copy(alpha = 0.94f))
+            .padding(horizontal = 6.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            @Composable fun B(t: String, on: Boolean = false, f: () -> Unit) = Text(t, color = if (on) A1 else Txt, fontSize = 18.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.clip(CircleShape).clickable(onClick = f).padding(horizontal = 12.dp, vertical = 8.dp))
+            B("‹") { web?.evaluateJavascript("fhNext(-1)", null) }
+            Text("${(readPct * 100).toInt()} % · ${if (minsLeft < 1) "fin" else "$minsLeft min"}", color = Sub, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 6.dp))
+            B("›") { web?.evaluateJavascript("fhNext(1)", null) }
+            B(if (speaking) "■" else "🔊", speaking) {
+                if (speaking) { tts.value?.stop(); speaking = false } else web?.evaluateJavascript("fhRead()", null)
+            }
+            B(when (auto) { 0 -> "⇣"; 1 -> "⇣1"; 2 -> "⇣2"; else -> "⇣3" }, auto > 0) { auto = (auto + 1) % 4; web?.evaluateJavascript("fhAuto(${auto})", null) }
+        }
+        }
     }
 }
