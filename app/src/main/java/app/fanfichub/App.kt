@@ -217,6 +217,24 @@ class Hub(ctx: Context) {
             r.toString()
         } }.awaitAll()
         reports.forEach { out.append(it) }
+        // AO3 et l'app elle-même
+        log("\n== AO3 · compte ${user ?: "aucun"} · ${siteStatus["AO3"] ?: "pas de synchro depuis l'ouverture"}")
+        works.filter { it.site == "AO3" }.let { a -> log("  ${a.size} fiches · sans résumé ${a.count { it.summary.isBlank() }} · nouveaux chapitres ${a.count { it.newChapters > 0 }}") }
+        user?.let { u -> val t0 = System.currentTimeMillis()
+            log("  test favoris : " + runCatching { withContext(Dispatchers.IO) { Ao3.page("/users/$u/bookmarks", "Favori").first.size } }.fold({ "$it fiches (${System.currentTimeMillis() - t0} ms)" }, { "ERREUR ${it.message}" })) }
+        log("\n== App")
+        log("  version ${version} · dernière en ligne ${runCatching { Updater.latest() }.getOrNull() ?: "?"}")
+        log("  fiches : ${works.size} au total · " + works.groupingBy { it.site }.eachCount().entries.joinToString(" · ") { "${it.key} ${it.value}" })
+        log("  stockage : données ${app.filesDir.walkTopDown().sumOf { it.length() } / 1024} Ko · cache ${app.cacheDir.walkTopDown().sumOf { it.length() } / 1024} Ko")
+        val rt = Runtime.getRuntime()
+        log("  mémoire : ${(rt.totalMemory() - rt.freeMemory()) / 1048576} Mo utilisés / ${rt.maxMemory() / 1048576} Mo")
+        log("  WebView : ${runCatching { android.webkit.WebView.getCurrentWebViewPackage()?.versionName }.getOrNull() ?: "?"}")
+        val t1 = System.currentTimeMillis()
+        log("  traduction : " + runCatching { Translator.texts(listOf("Hello, the pirate king is here.")).first() }.fold({ "« $it » (${System.currentTimeMillis() - t1} ms)" }, { "ERREUR ${it.message}" }))
+        val t2 = System.currentTimeMillis()
+        log("  image de couverture : " + (works.firstOrNull { goodCover(it.cover) }?.let { w -> runCatching { Img.load(w.cover) }.getOrNull()?.let { "chargée (${it.width}×${it.height}, ${System.currentTimeMillis() - t2} ms)" } ?: "échec ${w.cover.take(60)}" } ?: "aucune"))
+        log("  réglages : traduction auto ${autoTr} · thème ${theme} · taille ${size} · animation ${bookAnim}")
+        java.io.File(app.filesDir, "crash.txt").takeIf { it.exists() }?.let { log("  DERNIER PLANTAGE :\n" + it.readText().take(600)) } ?: log("  aucun plantage enregistré")
         diagRunning = false
         val txt = out.toString()
         runCatching { (app.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(android.content.ClipData.newPlainText("diag", txt)) }
