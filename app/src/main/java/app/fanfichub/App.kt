@@ -96,7 +96,7 @@ class Hub(ctx: Context) {
     suspend fun checkUpdate(manual: Boolean = false) {
         val l = Updater.latest()
         newVersion = l?.takeIf { it > version }
-        if (manual) status = if (l == null) "Impossible de vérifier les mises à jour" else if (newVersion == null) "L'app est à jour (version $version)" else "Version $l disponible"
+        if (manual && l == null) status = "Impossible de vérifier les mises à jour"
     }
 
     suspend fun doUpdate() {
