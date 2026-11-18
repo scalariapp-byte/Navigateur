@@ -439,11 +439,21 @@ fun Library(hub: Hub) {
     var selecting by remember { mutableStateOf(false) }
     val sel = remember { mutableStateListOf<String>() }
     fun open(w: Work) { if (selecting) { if (w.id in sel) sel.remove(w.id) else sel.add(w.id) } else hub.push(Screen.Detail(w.id)) }
-    val shelves = remember(visible) {
+    val shelves0 = remember(visible) {
         if (site == "ALL") visible.groupBy { it.site }.map { (k, v) -> k to v }.sortedByDescending { it.second.size }
         else if (site == "AO3" || site == "FanFiction.net") visible.groupBy { fandomKey(it) }.map { (k, v) -> k to v }.sortedByDescending { it.second.size }
         else visible.flatMap { w -> w.sources.map { it to w } }.groupBy({ it.first }, { it.second }).map { (k, v) -> k to v }.sortedByDescending { it.second.size }
     }
+    // Ordre des étagères selon le tri : A–Z, récentes, ou crossovers d'abord
+    val shelves = remember(shelves0, hub.sortMode) {
+        when (hub.sortMode) {
+            0 -> shelves0.sortedBy { collectionName(it.first).lowercase() }
+            2 -> shelves0.sortedWith(compareByDescending<Pair<String, List<Work>>> { crossName(collectionName(it.first)) }
+                .thenByDescending { p -> p.second.count { isCrossover(it) } * 1f / p.second.size }.thenByDescending { it.second.size })
+            else -> shelves0.sortedByDescending { p -> p.second.maxOfOrNull { dateKey(it) } ?: 0 }
+        }
+    }
+
     val list = remember(visible, q, f, col, hub.downloaded, hub.sortMode) {
         visible.filter { w ->
             col.let { c -> c == null || c in w.sources || c == w.site || ((w.site == "AO3" || w.site == "FanFiction.net") && c == fandomKey(w)) } &&

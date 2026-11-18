@@ -149,8 +149,27 @@ fun dateKey(w: Work): Int {
         val m = MONTHS.indexOf(mo) + 1; if (m > 0) return (y.toIntOrNull() ?: java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)) * 10000 + m * 100 + d.toInt() }
     return 0
 }
-/** Crossover : plusieurs fandoms, ou « x » / « crossover » dans le titre ou les tags. */
-fun isCrossover(w: Work) = fandomKey(w).startsWith("Crossover") || Regex("(?i)crossover|\\bx\\b|×").containsMatchIn(w.title + " " + w.tags.joinToString(" "))
+/** Fandoms reconnus par leurs noms courants (titre, tags, résumé, nom de liste). */
+private val FANDOMS = mapOf(
+    "onepiece" to listOf("one piece", "onepiece", "luffy", "zoro", "mugiwara", "strawhat"),
+    "mha" to listOf("my hero academia", "myheroacademia", "boku no hero", "bnha", "mha", "deku", "izuku", "bakugo"),
+    "naruto" to listOf("naruto", "boruto", "sasuke", "konoha"), "dxd" to listOf("dxd", "highschooldxd", "high school dxd", "rias"),
+    "bleach" to listOf("bleach", "ichigo"), "fairytail" to listOf("fairy tail", "fairytail", "natsu"),
+    "jjk" to listOf("jujutsu", "jjk", "gojo", "sukuna"), "kny" to listOf("demon slayer", "kimetsu", "tanjiro"),
+    "dbz" to listOf("dragon ball", "dragonball", "goku"), "hxh" to listOf("hunter x hunter", "hunterxhunter", "hxh", "gon"),
+    "blackclover" to listOf("black clover", "blackclover", "asta"), "pokemon" to listOf("pokemon", "pokémon"),
+    "marvel" to listOf("marvel", "avengers", "spider-man", "spiderman"), "dc" to listOf(" dc ", "justice league", "batman", "superman"),
+    "hp" to listOf("harry potter", "hogwarts"), "genshin" to listOf("genshin"), "csm" to listOf("chainsaw man", "chainsawman"),
+    "aot" to listOf("attack on titan", "shingeki", "aot"), "rwby" to listOf("rwby"), "opm" to listOf("one punch", "saitama"),
+    "akame" to listOf("akame ga kill"), "kh" to listOf("kingdom hearts"), "ben10" to listOf("ben 10", "ben10"),
+)
+private fun fandomsIn(t: String): Set<String> { val s = " " + t.lowercase() + " "; return FANDOMS.filter { (_, a) -> a.any { s.contains(it) } }.keys }
+/** Nom de liste ou titre qui annonce un crossover (« A x B », « crossover », 2 fandoms…), hors « x reader ». */
+fun crossName(t: String) = Regex("(?i)crossover|×").containsMatchIn(t) ||
+    (Regex("(?i)\\s[x×]\\s").containsMatchIn(t) && !Regex("(?i)\\sx\\s*(reader|you|oc|harem)").containsMatchIn(t)) || fandomsIn(t).size >= 2
+/** Crossover : plusieurs fandoms (site, tags, titre, résumé) ou titre annonçant un crossover. */
+fun isCrossover(w: Work) = fandomKey(w).startsWith("Crossover") || crossName(w.title) ||
+    fandomsIn(w.title + " " + w.tags.joinToString(" ") + " " + w.fandoms.joinToString(" ") + " " + w.summary.take(300)).size >= 2
 fun sortWorks(l: List<Work>, mode: Int): List<Work> = when (mode) {
     0 -> l.sortedBy { it.title.lowercase() }
     2 -> l.sortedWith(compareByDescending<Work> { isCrossover(it) }.thenBy { it.title.lowercase() })
