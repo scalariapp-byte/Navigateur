@@ -387,7 +387,9 @@ class Hub(ctx: Context) {
             old.values.filter { !(full && it.site == "AO3" && u != null) }.forEach { merged[it.id] = it }
             seen.values.forEach { f ->
                 val o = old[f.id]
-                val gained = if (o == null || o.chapters.startsWith("?") || f.chapters.startsWith("?")) 0 else maxOf(0, f.published - o.published)
+                // Pas de « nouveaux chapitres » si l'ancienne fiche était fausse (page de connexion, titre-identifiant, 1 chapitre par défaut)
+                val gained = if (o == null || o.chapters.startsWith("?") || f.chapters.startsWith("?") || badTitle(o.title) || (o.published <= 1 && f.published - o.published > 3)) 0
+                    else maxOf(0, f.published - o.published)
                 // Hors AO3, la bibliothèque du site fait foi : on remplace les collections (on garde seulement « Ajouté »)
                 val src = if (full || (f.site != "AO3" && f.id in libIds)) f.sources + o?.sources.orEmpty().filter { it == "Ajouté" } else o?.sources.orEmpty() + f.sources
                 merged[f.id] = if (o == null) f else if (f.chapters.startsWith("?") && !o.chapters.startsWith("?")) o.copy(sources = src) else f.copy(newChapters = o.newChapters + gained,
@@ -500,6 +502,13 @@ class Hub(ctx: Context) {
     fun prefetchCovers() { scope.launch { Img.prefetch(works.sortedByDescending { it.lastRead }.map { it.cover }) } }
 
     /** Vrai une seule fois après l'installation d'une nouvelle version. */
+    /** Remise à zéro unique des pastilles faussées par les anciennes fiches incorrectes (hors AO3). */
+    fun fixBadges() {
+        if (prefs.getBoolean("badgesFixed116", false)) return
+        prefs.edit().putBoolean("badgesFixed116", true).apply()
+        works.toList().forEachIndexed { i, w -> if (w.site != "AO3" && w.newChapters > 0) works[i] = w.copy(newChapters = 0) }
+        persist()
+    }
     fun firstRunOfVersion(): Boolean {
         if (prefs.getLong("ranVersion", 0) == version) return false
         prefs.edit().putLong("ranVersion", version).apply(); return true
@@ -538,7 +547,7 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         if (!::hub.isInitialized) return
         if (::hub.isInitialized) { hub.reload(); hub.startCheck(); hub.trimCache()
-            if (hub.firstRunOfVersion()) hub.startSync() else if (hub.syncDue(2)) hub.startSync(quick = true) }
+            if (hub.firstRunOfVersion()) { hub.fixBadges(); hub.startSync() } else if (hub.syncDue(2)) hub.startSync(quick = true) }
     }
     override fun onPause() { super.onPause(); if (::hub.isInitialized) runCatching { hub.flush() } }
 
