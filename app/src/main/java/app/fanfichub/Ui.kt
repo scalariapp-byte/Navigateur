@@ -433,12 +433,12 @@ fun Library(hub: Hub) {
     val visible = remember(hub.works.size, hub.syncing, site, hub.stack.size) { hub.visible() }
     val shelves = remember(visible) {
         if (site == "ALL") visible.groupBy { it.site }.map { (k, v) -> k to v }.sortedByDescending { it.second.size }
-        else if (site == "AO3") visible.groupBy { fandomKey(it) }.map { (k, v) -> k to v }.sortedByDescending { it.second.size }
+        else if (site == "AO3" || site == "FanFiction.net") visible.groupBy { fandomKey(it) }.map { (k, v) -> k to v }.sortedByDescending { it.second.size }
         else visible.flatMap { w -> w.sources.map { it to w } }.groupBy({ it.first }, { it.second }).map { (k, v) -> k to v }.sortedByDescending { it.second.size }
     }
     val list = remember(visible, q, f, col, hub.downloaded) {
         visible.filter { w ->
-            col.let { c -> c == null || c in w.sources || c == w.site || (w.site == "AO3" && c == fandomKey(w)) } &&
+            col.let { c -> c == null || c in w.sources || c == w.site || ((w.site == "AO3" || w.site == "FanFiction.net") && c == fandomKey(w)) } &&
             (q.isBlank() || listOf(w.title, w.author, w.fandoms.joinToString(), w.tags.joinToString()).any { it.contains(q, true) }) && when (f) {
                 1 -> w.progress > 0.01f && w.progress < 0.985f
                 2 -> w.newChapters > 0

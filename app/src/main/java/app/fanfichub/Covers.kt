@@ -174,7 +174,7 @@ fun BookShelf(title: String, works: List<Work>, onAll: () -> Unit, onBook: (Work
 
 /** Étagère AO3 : un fandom, ou un crossover (fandoms triés). */
 fun fandomKey(w: Work): String {
-    val f = w.fandoms.map { it.substringBefore(" (").substringBefore(" | ").trim() }.filter { it.isNotEmpty() }.distinct().sorted()
+    val f = w.fandoms.flatMap { it.split(" & ", " + ") }.map { it.substringBefore(" (").substringBefore(" | ").removeSuffix(" Xover").trim() }.filter { it.isNotEmpty() }.distinct().sorted()
     return when { f.isEmpty() -> "Sans fandom"; f.size == 1 -> f[0]; else -> "Crossover : " + f.joinToString(" × ") }
 }
 
