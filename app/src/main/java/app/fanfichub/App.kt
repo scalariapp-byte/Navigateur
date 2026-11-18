@@ -380,6 +380,7 @@ class Hub(ctx: Context) {
         if (syncing) return
         syncing = true
         val old = works.associateBy { it.id }
+        SyncMode.quick = quick && !full; SyncMode.known = old.keys
         val seen = LinkedHashMap<String, Work>()
         fun add(w: Work) { seen[w.id] = seen[w.id]?.let { it.copy(sources = it.sources + w.sources) } ?: w }
         val libIds = HashSet<String>() // fanfictions renvoyées par la bibliothèque d'un site (collections à jour)
@@ -423,8 +424,9 @@ class Hub(ctx: Context) {
                     val l = s.library(su, old)
                     // Résultat anormalement maigre (site qui freine, déconnexion) : on ajoute sans retirer les collections connues
                     val known = old.values.count { it.site == s.name }
-                    val trusted = known < 20 || l.size >= known / 2
+                    val trusted = !SyncMode.quick && (known < 20 || l.size >= known / 2)
                     l.forEach { add(it); if (trusted) libIds += it.id }; publish()
+                    if (SyncMode.quick) { siteStatus[s.name] = "${l.count { it.id !in old }} nouvelles · à jour"; return@runCatching }
                     if (!trusted) { siteStatus[s.name] = "Incomplet : ${l.size}/$known lues (le site freine), réessai à la prochaine synchro"; return@runCatching }
                     siteStatus[s.name] = "${l.size} fanfictions synchronisées"
                 }.onFailure { e -> siteStatus[s.name] = if (old.values.any { it.site == s.name }) "Synchro partielle : ${e.message}" else "Erreur : ${e.message}" }

@@ -314,7 +314,7 @@ fun Home(hub: Hub) {
         val pullScope = rememberCoroutineScope()
         PullToRefreshBox(isRefreshing = pulling, onRefresh = {
             pulling = true
-            hub.startSync(only = hub.site?.takeIf { it != "ALL" })
+            hub.startSync(only = hub.site?.takeIf { it != "ALL" }, quick = true)
             pullScope.launch { delay(700); pulling = false } // l'indicateur se range, la synchro continue en silence
         }, modifier = Modifier.fillMaxSize()) {
             when (hub.tab) { 0 -> Feed(hub); 1 -> Library(hub); 2 -> SearchTab(hub); else -> Accounts(hub) }
@@ -566,7 +566,7 @@ fun Accounts(hub: Hub) {
                     } } }
             }
             Line()
-            SettingRow({ RoundIcon(Icons.Default.Refresh) }, "Tout synchroniser") { hub.startSync() }
+            SettingRow({ RoundIcon(Icons.Default.Refresh) }, "Vérifier les nouveautés") { hub.startSync(quick = true) }
             Line()
             SettingRow({ RoundIcon(Icons.Default.Refresh, A2) }, "Synchronisation complète") { hub.startSync(full = true) }
         }

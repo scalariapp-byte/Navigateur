@@ -98,6 +98,13 @@ interface Site {
     suspend fun verify(user: String): String
 }
 
+/** Synchro rapide : on s'arrête dès qu'une page ne contient que des fanfictions déjà connues. */
+object SyncMode {
+    @Volatile var quick = false
+    @Volatile var known: Set<String> = emptySet()
+    fun stop(ids: Collection<String>) = quick && ids.isNotEmpty() && ids.all { it in known }
+}
+
 object Sites {
     private val every = listOf(Spirit, Wattpad, Ffn)
     val all get() = every.filter { Ext.on(it.name) }
@@ -206,7 +213,9 @@ object Wattpad : Site {
         var n = 0
         while (url != null && n++ < 10) {
             val o = JSONObject(json(url))
-            o.optJSONArray("stories")?.let { a -> for (i in 0 until a.length()) out += a.getJSONObject(i) }
+            val page = o.optJSONArray("stories")?.let { a -> (0 until a.length()).map { a.getJSONObject(it) } } ?: emptyList()
+            out += page
+            if (SyncMode.stop(page.map { "wp:" + it.get("id").toString() })) break
             url = o.optString("nextUrl").ifEmpty { null }?.let { if (it.startsWith("http")) it else B + it }
         }
         return out
@@ -589,6 +598,7 @@ object Ffn : Site {
                 added++
             }
             if (added == 0) break
+            if (SyncMode.stop(out.keys.toList().takeLast(added).map { "ffn:$it" })) break
         }
         // Couvertures : seulement sur la version ordinateur du profil (une seule page pour tous les favoris)
         if (out.isNotEmpty()) runCatching { Web.html("$B/u/$uid/", "pc") }.getOrNull()?.select("div.z-list[data-storyid]")?.forEach { e ->
@@ -827,6 +837,7 @@ object Spirit : Site {
                 for (attempt in 0..2) { d = runCatching { Web.html(url!!) }.getOrNull(); if (d != null) break; kotlinx.coroutines.delay(1500L * (attempt + 1)) }
                 if (d == null) break
                 addStories(d, "Liste : $name")
+                if (SyncMode.stop(cards(d, "x").map { it.id })) break
                 val next = d.select("a[rel=next], a").firstOrNull { it.attr("rel") == "next" || Regex("^pr[óo]xim", ic).containsMatchIn(it.text()) }?.absUrl("href")
                 // Page suivante de la MÊME liste uniquement (pas « liste suivante »)
                 url = next?.takeIf { it.isNotBlank() && it != url && it.substringBefore('?').trimEnd('/') == href.substringBefore('?').trimEnd('/') }
