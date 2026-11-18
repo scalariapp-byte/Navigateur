@@ -46,7 +46,9 @@ object Web {
 
     // Une file (et un navigateur caché) par site pour la synchro : Spirit, FF.net et Wattpad ne s'attendent plus entre eux
     private fun laneFor(url: String, lane: String) = if (lane == "sync") "sync:" + (runCatching { java.net.URI(url).host }.getOrNull() ?: "") else lane
-    private suspend fun load(url: String, json: Boolean, lane: String): String = lane(laneFor(url, lane)).let { l -> l.lock.withLock {
+    private val busy = kotlinx.coroutines.sync.Semaphore(2)
+    private suspend fun load(url: String, json: Boolean, lane: String): String = busy.withPermit { loadIn(url, json, lane) }
+    private suspend fun loadIn(url: String, json: Boolean, lane: String): String = lane(laneFor(url, lane)).let { l -> l.lock.withLock {
         val raw = withContext(Dispatchers.Main) {
             val w = l.wv ?: WebView(app).apply { settings.javaScriptEnabled = true; settings.domStorageEnabled = true
                 if (lane == "pc") settings.userAgentString = DESKTOP_UA }.also { l.wv = it }

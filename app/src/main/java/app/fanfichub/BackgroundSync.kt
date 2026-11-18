@@ -29,6 +29,12 @@ class BackgroundSync(ctx: Context, p: WorkerParameters) : CoroutineWorker(ctx, p
         hub.flush()
         val fresh = hub.works.filter { it.newChapters > (before[it.id] ?: 0) }
         if (fresh.isNotEmpty()) notify(ctx, fresh)
+        // Nouveaux commentaires AO3 : notification si le nombre de non lus augmente
+        hub.user?.let { u -> Ao3.unread(u)?.let { n ->
+            val p = ctx.getSharedPreferences("inbox", Context.MODE_PRIVATE)
+            if (n > p.getInt("ao3", 0)) notifyComments(ctx, n)
+            p.edit().putInt("ao3", n).apply()
+        } }
         return Result.success()
     }
 
@@ -37,6 +43,16 @@ class BackgroundSync(ctx: Context, p: WorkerParameters) : CoroutineWorker(ctx, p
             val req = PeriodicWorkRequestBuilder<BackgroundSync>(3, TimeUnit.HOURS)
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build()
             WorkManager.getInstance(ctx).enqueueUniquePeriodicWork("sync", ExistingPeriodicWorkPolicy.KEEP, req)
+        }
+
+        private fun notifyComments(ctx: Context, n: Int) {
+            if (Build.VERSION.SDK_INT >= 33 && ctx.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
+            val nm = ctx.getSystemService(NotificationManager::class.java)
+            nm.createNotificationChannel(NotificationChannel("comments", "Nouveaux commentaires", NotificationManager.IMPORTANCE_DEFAULT))
+            val open = PendingIntent.getActivity(ctx, 2, Intent(ctx, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+            nm.notify(2, NotificationCompat.Builder(ctx, "comments").setSmallIcon(android.R.drawable.sym_action_chat)
+                .setContentTitle("AO3 : $n commentaire" + (if (n > 1) "s" else "") + " non lu" + (if (n > 1) "s" else ""))
+                .setContentText("Réglages → Commentaires & messages pour répondre").setContentIntent(open).setAutoCancel(true).build())
         }
 
         private fun notify(ctx: Context, works: List<Work>) {

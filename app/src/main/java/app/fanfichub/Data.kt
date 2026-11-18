@@ -115,6 +115,13 @@ object Ao3 {
         (0 until a.length()).map { a.getJSONObject(it).optString("name").ifBlank { a.getJSONObject(it).optString("id") } }.filter { it.isNotBlank() }
     }.getOrDefault(emptyList())
 
+    /** Commentaires / messages non lus dans la boîte AO3 (null si non connecté). */
+    fun unread(user: String): Int? = runCatching {
+        val d = get("/users/$user/inbox?filters[read]=false")
+        if (d.selectFirst("form#new_user_session, #login") != null && d.select("li.comment, ol.comment li").isEmpty()) return null
+        Regex("(\\d+)\\s+unread", RegexOption.IGNORE_CASE).find(d.text())?.groupValues?.get(1)?.toInt() ?: d.select("ol.comment > li, li.unread, li.comment").size
+    }.getOrNull()
+
     fun username(): String? = runCatching {
         get("/").selectFirst("#greeting a[href^=/users/], ul.user.navigation a[href^=/users/], a.dropdown-toggle[href^=/users/]")
             ?.attr("href")?.removePrefix("/users/")?.substringBefore('/')?.ifBlank { null }

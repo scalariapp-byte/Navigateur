@@ -65,7 +65,10 @@ private const val READ_JS = """(function(){var s=document.getElementById('fhread
 '[id*=banner],[class*=app-banner],[class*=AppBanner],[class*=download-app],[class*=sticky-header]{display:none!important}'+
 'blockquote{margin:0 0 1em!important;padding:0 0 0 10px!important}.preface,.notes,.summary{padding:0 14px!important}'+
 '.preface .summary,.preface .notes,.chapter .notes,#work_endnotes,.end.notes,div[id=notes],[class*=notas]{display:none!important}p.jump{display:none!important}.fhfold{display:none!important}.fhmore{color:#b9a7ff;font-size:14px;font-weight:bold;padding:6px 0 12px;cursor:pointer}';
+if(window.__fhoff){s.textContent='';return}
 if(!s.parentNode)(document.head||document.documentElement).appendChild(s);
+setTimeout(function(){var ps=[].slice.call(document.querySelectorAll('p,[data-p-id],pre')).filter(function(p){return (p.innerText||'').trim().length>40});
+ if(ps.length>3&&!ps.some(function(p){return p.offsetHeight>0})){window.__fhoff=1;s.textContent=''}},1200);
 document.querySelectorAll('.notes,.chapter .preface .notes,div[id=notes]').forEach(function(n){var t=(n.innerText||'');if(!n.querySelector('blockquote')||/end of the chapter|fin du chapitre|end of the work/i.test(t)&&t.length<120)n.style.display='none'});
 // Résumé et notes repliés : « Tout afficher » pour déplier
 document.querySelectorAll('.preface .summary blockquote,.preface .notes blockquote,#work_endnotes blockquote,.end.notes blockquote,[class*=notas]').forEach(function(b){

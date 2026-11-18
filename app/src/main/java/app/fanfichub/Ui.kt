@@ -451,6 +451,9 @@ fun Library(hub: Hub) {
             2 -> shelves0.sortedWith(compareByDescending<Pair<String, List<Work>>> { crossName(collectionName(it.first)) }
                 .thenByDescending { p -> p.second.count { isCrossover(it) } * 1f / p.second.size }.thenByDescending { it.second.size })
             else -> shelves0.sortedByDescending { p -> p.second.maxOfOrNull { dateKey(it) } ?: 0 }
+        }.let { l ->
+            fun key(n: String) = collectionName(n).lowercase().replace(Regex("[^a-z]"), "")
+            l.groupBy { key(it.first) }.values.flatten()
         }
     }
 
@@ -666,7 +669,7 @@ fun Accounts(hub: Hub) {
                 if (hub.newVersion != null) hub.startUpdate() else hub.startCheck(manual = true)
             }
             SettingRow({ RoundIcon(Icons.Default.Info) }, "Diagnostic",
-                if (hub.diagRunning) "En cours…" else null) { hub.runDiag() }
+                if (hub.diagRunning) "En cours… touche pour annuler" else null) { hub.runDiag() }
         }
     }
 }

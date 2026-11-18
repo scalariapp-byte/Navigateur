@@ -204,7 +204,9 @@ class Hub(ctx: Context) {
         if (size > 120L * 1024 * 1024) android.webkit.WebView(app).clearCache(true)
     } }
 
-    fun runDiag() { if (diagRunning) return; diagRunning = true; scope.launch {
+    private var diagJob: kotlinx.coroutines.Job? = null
+    fun cancelDiag() { diagJob?.cancel(); diagRunning = false }
+    fun runDiag() { if (diagRunning) { cancelDiag(); return }; diagRunning = true; diagJob = scope.launch {
         val out = StringBuffer()
         fun log(s: String) { out.append(s).append('\n') }
         log("Fanfic Hub v$version · Android ${android.os.Build.VERSION.RELEASE} · ${android.os.Build.MODEL}")
