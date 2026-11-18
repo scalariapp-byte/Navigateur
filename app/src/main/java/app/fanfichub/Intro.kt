@@ -180,8 +180,6 @@ private fun ShelfScene(counts: Map<String, Int>, auto: String?, header: Boolean,
                     scale = sc, open = open.value,
                 ), Ww, Hh, Tt)
             }
-            if (landed) Text(s.name, color = Txt, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.align(Alignment.TopCenter)
-                .offset(y = floorY + 150.dp - 16.dp * open.value).graphicsLayer { alpha = open.value })
         }
         if (onAll != null && falling == null) Text("Tout voir", color = A1, fontSize = 16.sp, fontWeight = FontWeight.Bold,
             modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 24.dp).clip(CircleShape).clickable { onAll() }.padding(14.dp))

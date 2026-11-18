@@ -31,7 +31,7 @@ private fun rotZ(p: V, a: Float) = V(p.x * cos(a) - p.y * sin(a), p.x * sin(a) +
 /** Position et orientation du livre (angles en degrés, open de 0 à 1). */
 class BookPose(val cx: Float, val cy: Float, val rx: Float, val ry: Float, val rz: Float, val scale: Float, val open: Float)
 
-private class Face(val pts: List<V>, val color: Color, val lines: List<Pair<V, V>> = emptyList(), val back: Color? = null, val cover: Boolean = false, val spine: Boolean = false)
+private class Face(val pts: List<V>, val color: Color, val lines: List<Pair<V, V>> = emptyList(), val back: Color? = null, val cover: Boolean = false, val spine: Boolean = false, val titlePage: Boolean = false)
 
 private val PaperC = Color(0xFFF3EBDD)
 private val PaperBack = Color(0xFFE6DCC8)
@@ -72,10 +72,10 @@ fun DrawScope.drawBook3D(color: Color, logo: String, title: String, pose: BookPo
         val y = hh - 22 - i * (H - 44) / 13f
         V(-hw + 16, y, zTop) to V(hw - 18 - if (i % 4 == 3) W * 0.3f else 0f, y, zTop)
     }
-    faces += Face(listOf(V(-hw + 3, -hh + 4, zTop), V(hw - 4, -hh + 4, zTop), V(hw - 4, hh - 4, zTop), V(-hw + 3, hh - 4, zTop)), PaperC, text)
+    faces += Face(listOf(V(-hw + 3, -hh + 4, zTop), V(hw - 4, -hh + 4, zTop), V(hw - 4, hh - 4, zTop), V(-hw + 3, hh - 4, zTop)), PaperC, titlePage = true)
     // Pages qui se tournent (décalées dans le temps)
-    for (k in 3 downTo 0) {
-        val t = ((pose.open - 0.22f - k * 0.13f) / 0.45f).coerceIn(0f, 1f)
+    for (k in 1 downTo 0) {
+        val t = ((pose.open - 0.3f - k * 0.18f) / 0.5f).coerceIn(0f, 1f)
         if (t <= 0f) continue
         val a = 176f * deg * t
         val z = zTop - 0.3f * (k + 1)
@@ -102,6 +102,26 @@ fun DrawScope.drawBook3D(color: Color, logo: String, title: String, pose: BookPo
         drawPath(path, Color.Black.copy(alpha = 0.18f), style = Stroke(1.2f))
         if (f.lines.isNotEmpty() && (f.back == null || true)) f.lines.forEach { (a, b) ->
             drawLine(Color(0x33000000), proj(world(a)), proj(world(b)), 1.6f)
+        }
+        if (f.titlePage && front && pose.open > 0.55f) {
+            // Page de titre imprimée dans le livre : logo, filet, nom du site
+            val o = w.map { proj(it) }
+            val c = (o[0] + o[1] + o[2] + o[3]) / 4f
+            val pw = (o[1] - o[0]).getDistance(); val ph = (o[3] - o[0]).getDistance()
+            val ang = Math.toDegrees(kotlin.math.atan2((o[1] - o[0]).y.toDouble(), (o[1] - o[0]).x.toDouble())).toFloat()
+            val a = ((pose.open - 0.55f) / 0.3f).coerceIn(0f, 1f)
+            if (pw > 24f) {
+                val nc = drawContext.canvas.nativeCanvas
+                nc.save(); nc.rotate(ang, c.x, c.y)
+                paint.typeface = android.graphics.Typeface.DEFAULT_BOLD; paint.letterSpacing = 0f
+                paint.color = lerp(color, Color.Black, 0.2f).copy(alpha = a).toArgb(); paint.textSize = pw * 0.2f
+                nc.drawText(logo, c.x, c.y - ph * 0.08f, paint)
+                paint.color = Color(0xFF3B2F22).copy(alpha = a * 0.6f).toArgb()
+                nc.drawRect(c.x - pw * 0.15f, c.y + ph * 0.0f, c.x + pw * 0.15f, c.y + ph * 0.0f + 2f, paint)
+                paint.typeface = serif; paint.letterSpacing = 0.18f; paint.color = Color(0xFF2A2118).copy(alpha = a).toArgb(); paint.textSize = pw * 0.085f
+                nc.drawText(spineName(title), c.x, c.y + ph * 0.1f, paint)
+                nc.restore()
+            }
         }
         if (f.spine && front) {
             // Dos : titre espacé, lu de haut en bas
