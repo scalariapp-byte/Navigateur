@@ -505,9 +505,11 @@ class Hub(ctx: Context) {
     /** Remise à zéro unique des pastilles faussées par les anciennes fiches incorrectes (hors AO3). */
     fun fixBadges() {
         if (prefs.getBoolean("badgesFixed116", false)) return
-        prefs.edit().putBoolean("badgesFixed116", true).apply()
-        works.toList().forEachIndexed { i, w -> if (w.site != "AO3" && w.newChapters > 0) works[i] = w.copy(newChapters = 0) }
-        persist()
+        scope.launch {
+            awaitLoad()
+            works.toList().forEachIndexed { i, w -> if (w.site != "AO3" && w.newChapters > 0) works[i] = w.copy(newChapters = 0) }
+            persist(); prefs.edit().putBoolean("badgesFixed116", true).apply()
+        }
     }
     fun firstRunOfVersion(): Boolean {
         if (prefs.getLong("ranVersion", 0) == version) return false
