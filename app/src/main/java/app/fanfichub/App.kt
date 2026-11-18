@@ -504,11 +504,12 @@ class Hub(ctx: Context) {
     /** Vrai une seule fois après l'installation d'une nouvelle version. */
     /** Remise à zéro unique des pastilles faussées par les anciennes fiches incorrectes (hors AO3). */
     fun fixBadges() {
-        if (prefs.getBoolean("badgesFixed116", false)) return
+        if (prefs.getBoolean("badgesFixed116", false)) { startSync(); return }
         scope.launch {
             awaitLoad()
             works.toList().forEachIndexed { i, w -> if (w.site != "AO3" && w.newChapters > 0) works[i] = w.copy(newChapters = 0) }
             persist(); prefs.edit().putBoolean("badgesFixed116", true).apply()
+            sync() // après la remise à zéro, pour ne pas la réécraser
         }
     }
     fun firstRunOfVersion(): Boolean {
@@ -549,7 +550,7 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         if (!::hub.isInitialized) return
         if (::hub.isInitialized) { hub.reload(); hub.startCheck(); hub.trimCache()
-            if (hub.firstRunOfVersion()) { hub.fixBadges(); hub.startSync() } else if (hub.syncDue(2)) hub.startSync(quick = true) }
+            if (hub.firstRunOfVersion()) hub.fixBadges() else if (hub.syncDue(2)) hub.startSync(quick = true) }
     }
     override fun onPause() { super.onPause(); if (::hub.isInitialized) runCatching { hub.flush() } }
 
