@@ -36,6 +36,16 @@ import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewFeature
 
 /** Masque les encarts d'inscription, recommandations, pieds de page et bannières (relancé quand la page change). */
+/** Mise en page de lecture : fond sombre, texte large et aéré, barres/bannières/pubs masquées (AO3, FF.net, Wattpad, Spirit). */
+private const val READ_JS = """(function(){if(document.getElementById('fhread'))return;var s=document.createElement('style');s.id='fhread';s.textContent=
+'html,body{background:#111!important;color:#e8e6e3!important}'+
+'header,nav,#header,#footer,#skiplinks,.landmark,.notice,ul.work.navigation.actions,dl.work.meta,#top,.lc-wrapper,#p_footer,.navbar,#smartbanner,.smartbanner,[class*=smartbanner],[class*=Advertisement],[class*=advert],[class*=ad-container],[data-testid*=ad],[id*=google_ads],.adsbygoogle{display:none!important}'+
+'#chapters,.userstuff,#storytext,#storycontent,.texto,#texto,#conteudoTexto,.part-content,pre{max-width:720px!important;margin:0 auto!important;padding:0 18px!important;background:transparent!important}'+
+'#chapters p,.userstuff p,#storytext p,#storytext,#storycontent p,.texto p,#texto p,#conteudoTexto p,.part-content p,pre p{font-family:Georgia,"Noto Serif",serif!important;font-size:19px!important;line-height:1.8!important;color:#e8e6e3!important;margin:0 0 1.05em!important;text-align:left!important}'+
+'h1,h2,h3,.title{color:#fff!important;line-height:1.3!important}a{color:#b9a7ff!important}img{max-width:100%!important;height:auto!important}'+
+'body{padding-bottom:40px!important;-webkit-text-size-adjust:100%!important}';
+document.head.appendChild(s)})()"""
+
 private const val CLEAN_JS = """(function(){
 var P=['Rejoins la plus grande','Join the largest','Cela pourrait aussi te plaire','You may also like','Télécharger l','Download the','Essayer Premium','Try Premium','Signaler cette histoire','Report this story','Directives du Contenu','Content Guidelines','Partenariats avec','Ouvrir dans l','Open in app','Inscris-toi','Sign up','Cadastre-se','Baixe o app'];
 function hide(e){if(e&&e.style)e.style.setProperty('display','none','important')}
@@ -101,7 +111,7 @@ fun WebScreen(hub: Hub, url: String, title: String) {
                     override fun shouldOverrideUrlLoading(v: WebView, r: WebResourceRequest) = !r.url.scheme.orEmpty().startsWith("http")
                     override fun doUpdateVisitedHistory(v: WebView, u: String?, reload: Boolean) { canBack = v.canGoBack() }
                     override fun onPageFinished(v: WebView, u: String?) {
-                        v.evaluateJavascript(CLEAN_JS, null)
+                        v.evaluateJavascript(READ_JS, null); v.evaluateJavascript(CLEAN_JS, null)
                         if (hub.webFr && tr != "0 %") { tr = "0 %"; v.postDelayed({ v.evaluateJavascript(TR_JS, null) }, 600) }
                     }
                 }
