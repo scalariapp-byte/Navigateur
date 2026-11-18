@@ -84,7 +84,9 @@ interface Site {
     val home: String
     val userHint: String
     fun owns(url: String): Boolean
-    suspend fun info(url: String): Work?
+    suspend fun info(url: String, lane: String = "sync"): Work?
+    /** Sonde de diagnostic : lit la 1re page de favoris/liste et décrit 2 entrées (titre, résumé trouvé, extrait). */
+    suspend fun probe(user: String): String = ""
     suspend fun download(w: Work): Pair<List<String>, String>
     suspend fun library(user: String, known: Map<String, Work>): List<Work>
     /** Erreur de format immédiate (null si le texte a la bonne forme). */
@@ -161,12 +163,12 @@ object Wattpad : Site {
             site = name, url = "$B/story/$id", cover = o.optString("cover"), checked = System.currentTimeMillis())
     }
 
-    override suspend fun info(url: String): Work? {
+    override suspend fun info(url: String, lane: String): Work? {
         var id = Regex("/story/(\\d+)").find(url)?.groupValues?.get(1)
         if (id == null) Regex("wattpad\\.com/(\\d+)").find(url)?.groupValues?.get(1)?.let { pid ->
-            id = JSONObject(json("$B/api/v3/story_parts/$pid?fields=groupId")).optString("groupId").ifEmpty { null }
+            id = JSONObject(json("$B/api/v3/story_parts/$pid?fields=groupId", lane)).optString("groupId").ifEmpty { null }
         }
-        return id?.let { work(JSONObject(json("$B/api/v3/stories/$it?fields=$F"))) }
+        return id?.let { work(JSONObject(json("$B/api/v3/stories/$it?fields=$F", lane))) }
     }
 
     override suspend fun download(w: Work): Pair<List<String>, String> {
@@ -372,6 +374,11 @@ object Wattpad : Site {
 
     suspend fun listWorks(id: String): List<Work> = listStories(id).map { work(it).copy(sources = setOf("Recherche")) }
 
+    override suspend fun probe(user: String): String {
+        val a = JSONObject(json("$B/api/v3/users/${enc(user)}/library?limit=2&fields=stories(id,title,description)", "ui")).optJSONArray("stories") ?: JSONArray()
+        return "  sonde bibliothèque : " + (0 until a.length()).joinToString(" ; ") { a.getJSONObject(it).let { o -> "${o.optString("title").take(30)} → « ${o.optString("description").take(60)} »" } }
+    }
+
     // ---- Compte Wattpad : listes de lecture (session du navigateur intégré)
     private suspend fun post(url: String, data: Map<String, String>): String? = withContext(Dispatchers.IO) {
         runCatching {
@@ -491,6 +498,21 @@ object Ffn : Site {
             done, setOf("Favori"), site = name, url = "$B/s/$id", cover = cover, checked = System.currentTimeMillis())
     }
     private fun img(e: org.jsoup.nodes.Element?): String = e?.let { it.absUrl("data-original").ifBlank { it.absUrl("src") } }?.replace("/75/", "/180/")?.takeIf { it.startsWith("http") && Regex("/image/\\d+/").containsMatchIn(it) } ?: ""
+    override suspend fun probe(user: String): String {
+        val uid = Regex("(\\d{3,})").find(user)?.value ?: return "  sonde : identifiant introuvable"
+        val d = Web.html("$M/u/$uid/?a=fs&p=1", "ui")
+        val sb = StringBuilder("  sonde favoris : « ${d.title().take(50)} » · liens histoire ${d.select("a[href^=/s/]").size}\n")
+        d.select("a[href^=/s/]").filter { it.text().isNotBlank() }.distinctBy { it.attr("href").substringBefore("/", "") }.take(2).forEach { a ->
+            val box = generateSequence(a.parent()) { it.parent() }.firstOrNull { it.text().length > a.text().length + 20 || it.tagName() == "div" } ?: a.parent()!!
+            val meta = box.selectFirst(".gray, .xgray, .z-padtop2")?.text() ?: ""
+            sb.append("   - ${a.text().take(40)} → résumé « ${ffnSummary(box, a.text(), meta).take(90)} »\n     bloc : ${box.outerHtml().replace(Regex("\\s+"), " ").take(400)}\n")
+        }
+        val s = d.selectFirst("a[href^=/s/]")?.attr("href")?.let { Regex("^/s/(\\d+)").find(it)?.groupValues?.get(1) }
+        if (s != null) { val p = Web.html("$M/s/$s/1/", "ui")
+            sb.append("  page histoire : « ${p.title().take(50)} » · meta « ${metaDesc(p).take(90)} » · #profile_top ${p.select("#profile_top").size}\n     haut : ${p.body()?.text()?.take(300)}\n") }
+        return sb.toString()
+    }
+
     /** Résumé d'une entrée de liste : le texte du bloc moins le titre, « by Auteur » et la ligne de stats. */
     private fun ffnSummary(box: org.jsoup.nodes.Element, title: String, meta: String): String {
         box.selectFirst(".z-indent, .z-padtop")?.ownText()?.trim()?.takeIf { it.length > 20 }?.let { return it }
@@ -500,9 +522,9 @@ object Ffn : Site {
     }
     private fun metaDesc(d: Document) = (d.selectFirst("meta[name=description]")?.attr("content") ?: d.selectFirst("meta[property=og:description]")?.attr("content") ?: "").trim()
 
-    override suspend fun info(url: String): Work? {
+    override suspend fun info(url: String, lane: String): Work? {
         val id = Regex("/s/(\\d+)").find(url)?.groupValues?.get(1) ?: return null
-        val d = Web.html("$M/s/$id/1/")
+        val d = Web.html("$M/s/$id/1/", lane)
         val text = d.text()
         if (!Regex("chapters?:|words?:|rated:", IC).containsMatchIn(text)) error("page FanFiction.net illisible (vérification anti-robot ?)")
         // Titre de page : « Titre Chapter 1, a Naruto fanfic | FanFiction »
@@ -642,6 +664,23 @@ object Spirit : Site {
         return ""
     }
 
+    override suspend fun probe(user: String): String {
+        val u = URLEncoder.encode(user.trim(), "UTF-8")
+        val prof = Web.html("$B/perfil/$u/listas", "ui")
+        val list = prof.select("a[href*=/listas/]").map { it.absUrl("href") }.firstOrNull { Regex("/listas/[^/?#]+-\\d+").containsMatchIn(it) }
+            ?: return "  sonde : aucune liste sur « ${prof.title().take(50)} »"
+        val d = Web.html(list, "ui")
+        val sb = StringBuilder("  sonde liste : $list · fiches ${cards(d, "x").size}\n")
+        cards(d, "x").take(2).forEach { w -> sb.append("   - ${w.title.take(40)} → résumé « ${w.summary.take(90)} »\n") }
+        d.select("a[href*=/historia/]").firstOrNull { slug(it.attr("href")) != null }?.let { a ->
+            val box = generateSequence(a.parent()) { it.parent() }.take(8).firstOrNull { e -> e.text().contains("escrita por", true) && e.select("a[href*=/historia/]").mapNotNull { slug(it.attr("href")) }.distinct().size <= 1 }
+            sb.append("     fiche HTML : ${(box ?: a.parent())?.outerHtml()?.replace(Regex("\\s+"), " ")?.take(900)}\n")
+            val p = Web.html(a.absUrl("href").substringBefore('#'), "ui")
+            sb.append("  page histoire : « ${p.title().take(50)} » · meta « ${(p.selectFirst("meta[name=description]")?.attr("content") ?: "").take(90)} » · blocs sinopse ${p.select("[class*=sinopse], [class*=resumo]").size}\n")
+        }
+        return sb.toString()
+    }
+
     /** Un texte de lien qui ressemble à une adresse ou à un identifiant (« one-piece-luffy-123 ») n'est pas un titre. */
     private fun slugLike(t: String) = t.isBlank() || (!t.trim().contains(' ') && t.contains('-')) || t.startsWith("http")
 
@@ -681,9 +720,9 @@ object Spirit : Site {
 
     private fun pretty(sl: String) = sl.substringBeforeLast('-').replace('-', ' ').replaceFirstChar { it.uppercase() }
 
-    override suspend fun info(url: String): Work? {
+    override suspend fun info(url: String, lane: String): Work? {
         val s = slug(url) ?: return null
-        val d = Web.html("$B/historia/$s")
+        val d = Web.html("$B/historia/$s", lane)
         val body = d.text()
         val ic = RegexOption.IGNORE_CASE
         val og = d.selectFirst("meta[property=og:title]")?.attr("content").orEmpty()

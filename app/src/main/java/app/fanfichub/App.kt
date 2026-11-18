@@ -192,19 +192,30 @@ class Hub(ctx: Context) {
 
     var diagRunning by mutableStateOf(false); private set
     /** Diagnostic Spirit : relit le compte en journalisant tout, puis propose de partager le rapport. */
+    /**
+     * Diagnostic rapide (≈20 s) : par site, état des fiches (résumé, couverture, titre) puis test ciblé
+     * sur 2 fiches sans résumé et sur la page de liste/favoris. Tous les sites en parallèle, délai max 30 s chacun.
+     */
     fun runDiag() { if (diagRunning) return; diagRunning = true; scope.launch {
-        Diag.reset(); Diag.on = true
-        Diag.log("Fanfic Hub v$version · Android ${android.os.Build.VERSION.RELEASE} · ${android.os.Build.MODEL}")
-        val su = users["Spirit Fanfics"]
-        Diag.log("Compte Spirit : ${su ?: "aucun"}")
-        if (su != null) runCatching { Spirit.library(su, emptyMap()) }.onSuccess { l ->
-            Diag.log("\nRésultat : ${l.size} histoires")
-            l.flatMap { w -> w.sources.map { it to w } }.groupBy({ it.first }, { it.second }).forEach { (s, ws) ->
-                Diag.log("== $s (${ws.size}) : " + ws.take(25).joinToString(" ; ") { it.title.take(30) }) }
-        }.onFailure { Diag.log("ERREUR : ${it.message}") }
-        Diag.log("\nEn mémoire (Spirit) : " + works.filter { it.site == "Spirit Fanfics" }.flatMap { it.sources }.groupingBy { it }.eachCount())
-        Diag.on = false; diagRunning = false
-        val txt = Diag.text()
+        val out = StringBuffer()
+        fun log(s: String) { out.append(s).append('\n') }
+        log("Fanfic Hub v$version · Android ${android.os.Build.VERSION.RELEASE} · ${android.os.Build.MODEL}")
+        val reports = Sites.all.map { site -> async(Dispatchers.IO) {
+            val r = StringBuilder()
+            val mine = works.filter { it.site == site.name }
+            val noSum = mine.filter { it.summary.isBlank() }
+            r.append("\n== ${site.name} · compte ${account(site.name) ?: "aucun"} · ${mine.size} fiches · sans résumé ${noSum.size} · sans couverture ${mine.count { !goodCover(it.cover) }} · titres-identifiants ${mine.count { Regex("^[a-z0-9-]+-\\d+$").matches(it.title) }}\n")
+            noSum.take(2).forEach { w ->
+                val t0 = System.currentTimeMillis()
+                val inf = kotlinx.coroutines.withTimeoutOrNull(30_000) { runCatching { site.info(w.link, "ui") }.getOrElse { e -> r.append("  ! ${w.title.take(40)} : ${e.message}\n"); null } }
+                r.append("  • ${w.title.take(45)} (${System.currentTimeMillis() - t0} ms) → résumé « ${inf?.summary?.take(90) ?: "—"} »\n")
+            }
+            account(site.name)?.let { u -> kotlinx.coroutines.withTimeoutOrNull(30_000) { runCatching { site.probe(u) }.getOrElse { "  ! sonde : ${it.message}" } }?.let { r.append(it).append('\n') } }
+            r.toString()
+        } }.awaitAll()
+        reports.forEach { out.append(it) }
+        diagRunning = false
+        val txt = out.toString()
         runCatching { (app.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(android.content.ClipData.newPlainText("diag", txt)) }
         app.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, txt), "Rapport de diagnostic")
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -216,7 +227,7 @@ class Hub(ctx: Context) {
         if (w.summary.isNotBlank() || !detailing.add(w.id)) return
         val site = Sites.all.firstOrNull { it.name == w.site } ?: return
         scope.launch {
-            runCatching { withContext(Dispatchers.IO) { site.info(w.link) } }.getOrNull()?.let { inf ->
+            runCatching { withContext(Dispatchers.IO) { site.info(w.link, "ui") } }.getOrNull()?.let { inf ->
                 val cur = work(w.id) ?: w
                 val upd = cur.copy(summary = inf.summary.ifBlank { cur.summary }, words = if (inf.words > 0) inf.words else cur.words,
                     author = cur.author.ifBlank { inf.author }, cover = cur.cover.takeIf { goodCover(it) } ?: inf.cover)

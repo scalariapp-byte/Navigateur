@@ -597,8 +597,8 @@ fun Accounts(hub: Hub) {
                 trail = { if (hub.newVersion != null) FilterPill(hub.updating?.let { "${(it * 100).toInt()} %" } ?: "Mettre à jour", true) { hub.startUpdate() } }) {
                 if (hub.newVersion != null) hub.startUpdate() else hub.startCheck(manual = true)
             }
-            SettingRow({ RoundIcon(Icons.Default.Info) }, "Diagnostic Spirit",
-                if (hub.diagRunning) "Analyse en cours… (1 à 2 min)" else "Analyse tes listes et copie le rapport à m'envoyer") { hub.runDiag() }
+            SettingRow({ RoundIcon(Icons.Default.Info) }, "Diagnostic",
+                if (hub.diagRunning) "Analyse en cours… (≈20 s)" else "Teste résumés, couvertures et listes, puis copie le rapport") { hub.runDiag() }
         }
     }
 }
