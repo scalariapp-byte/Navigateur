@@ -44,7 +44,9 @@ object Web {
     /** Texte brut de la page (réponses JSON des API), via le vrai navigateur et sa session. */
     suspend fun text(url: String, lane: String = "sync"): String = load(url, json = true, lane = lane)
 
-    private suspend fun load(url: String, json: Boolean, lane: String): String = lane(lane).let { l -> l.lock.withLock {
+    // Une file (et un navigateur caché) par site pour la synchro : Spirit, FF.net et Wattpad ne s'attendent plus entre eux
+    private fun laneFor(url: String, lane: String) = if (lane == "sync") "sync:" + (runCatching { java.net.URI(url).host }.getOrNull() ?: "") else lane
+    private suspend fun load(url: String, json: Boolean, lane: String): String = lane(laneFor(url, lane)).let { l -> l.lock.withLock {
         val raw = withContext(Dispatchers.Main) {
             val w = l.wv ?: WebView(app).apply { settings.javaScriptEnabled = true; settings.domStorageEnabled = true
                 if (lane == "pc") settings.userAgentString = DESKTOP_UA }.also { l.wv = it }
