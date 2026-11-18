@@ -81,7 +81,7 @@ fun NetFill(url: String, modifier: Modifier = Modifier, alignment: Alignment = A
 @Volatile var dupCovers: Set<String> = emptySet()
 /** Une même image sur 3 histoires ou plus = image par défaut du site. */
 fun refreshDupCovers(ws: List<Work>) { dupCovers = ws.groupingBy { it.cover }.eachCount().filter { it.key.isNotBlank() && it.value >= 3 }.keys }
-fun goodCover(u: String) = u.isNotBlank() && u !in dupCovers && ("fanfiction.net" !in u && "fictionpress" !in u || Regex("/image/\\d+/").containsMatchIn(u))
+fun goodCover(u: String) = u.isNotBlank() && u !in dupCovers && "/img/common/" !in u && ("fanfiction.net" !in u && "fictionpress" !in u || Regex("/image/\\d+/").containsMatchIn(u))
 
 /** Couverture : vraie image si le site en fournit une, sinon couverture générée aux couleurs du fandom. */
 @Composable

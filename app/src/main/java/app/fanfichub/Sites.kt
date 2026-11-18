@@ -776,7 +776,7 @@ object Spirit : Site {
         return titles.map { (sl, t) ->
             val src = sources[sl] ?: mutableSetOf("Favori")
             val f = full[sl]
-            known["sp:$sl"]?.let { k -> k.copy(sources = src, cover = k.cover.ifEmpty { covers[sl] ?: "" },
+            known["sp:$sl"]?.let { k -> k.copy(sources = src, cover = covers[sl]?.takeIf { it.isNotBlank() } ?: k.cover.takeIf { "/common/" !in it } ?: "",
                 title = if (slugLike(k.title) || k.title.replace(' ', '-').startsWith(sl.substringBeforeLast('-').take(12))) (f?.title ?: t.ifBlank { pretty(sl) }) else k.title,
                 author = k.author.ifBlank { f?.author ?: "" }, summary = k.summary.ifBlank { f?.summary ?: "" },
                 fandoms = if (k.fandoms == listOf(name)) f?.fandoms ?: k.fandoms else k.fandoms,
