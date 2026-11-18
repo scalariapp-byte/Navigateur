@@ -459,8 +459,6 @@ fun Library(hub: Hub) {
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 CircleIcon(Icons.Default.Search) { searching = !searching; if (!searching) q = "" }
-                Spacer(Modifier.width(8.dp))
-                CircleIcon(Icons.Default.Add) { adding = !adding }
             }
         }
         item { SiteChips(hub) }
@@ -485,7 +483,7 @@ fun Library(hub: Hub) {
         }
         if (!listMode) {
             item { Spacer(Modifier.height(16.dp)) }
-            if (shelves.isEmpty()) item { Empty("Vide. Configure un compte ou +.") }
+            if (shelves.isEmpty()) item { Empty("Vide. Configure un compte.") }
             items(shelves, key = { it.first }) { (k, v) ->
                 BookShelf(if (site == "ALL") k else collectionName(k), v, onAll = { col = k }) { w -> hub.push(Screen.Detail(w.id)) }
             }
