@@ -705,7 +705,7 @@ object Spirit : Site {
         }
         // Favoris et bibliothèque
         for ((path, src) in listOf("/perfil/$u/favoritos" to "Favori", "/perfil/$u/biblioteca" to "Bibliothèque", "/biblioteca" to "Bibliothèque")) {
-            runCatching { Web.html(B + path) }.getOrNull()?.let { addStories(it, src) }
+            runCatching { Web.html(B + path) }.getOrNull()?.let { Diag.log("$src $path : fiches ${cards(it, "x").size} · liens ${it.select("a[href*=/historia/]").size}"); addStories(it, src) }
         }
         // Listes de lecture : liens « lista » du profil et de la page « Veja todas as Listas de leitura »
         val lists = LinkedHashMap<String, String>() // url -> nom
@@ -720,14 +720,25 @@ object Spirit : Site {
             d.select("a").firstOrNull { it.text().contains("Listas de leitura", true) && it.text().startsWith("Veja", true) }?.absUrl("href")
                 ?.let { all -> runCatching { Web.html(all) }.getOrNull()?.let { collectLists(it) } }
         }
+        Diag.log("Listes trouvées : ${lists.size}")
+        lists.forEach { (h, n) -> Diag.log("  • $n → $h") }
         lists.entries.take(40).forEach { (href, name) ->
             var url: String? = href; var n = 0
             while (url != null && n++ < 10) {
-                val d = runCatching { Web.html(url!!) }.getOrNull() ?: break
+                val d = runCatching { Web.html(url!!) }.getOrNull() ?: run { Diag.log("[$name] page illisible : $url"); null } ?: break
+                val c = cards(d, "x")
+                Diag.log("[$name] page $n : $url · titre « ${d.title().take(60)} » · fiches ${c.size} · liens histoire ${d.select("a[href*=/historia/]").size}")
+                c.take(3).forEach { Diag.log("     - ${it.title.take(50)} | ${it.author} | img=${it.cover.take(90)}") }
+                if (n == 1 && name == lists.values.first()) {
+                    val a = d.selectFirst("a[href*=/historia/]")
+                    val box = generateSequence(a?.parent()) { it.parent() }.take(8).firstOrNull { it.text().contains("escrita por", true) }
+                    Diag.log("     HTML 1re fiche : " + (box?.outerHtml() ?: a?.parent()?.outerHtml() ?: "aucune").replace(Regex("\\s+"), " ").take(1500))
+                }
                 addStories(d, "Liste : $name")
                 val next = d.select("a[rel=next], a").firstOrNull { it.attr("rel") == "next" || Regex("^pr[óo]xim", ic).containsMatchIn(it.text()) }?.absUrl("href")
                 // Page suivante de la MÊME liste uniquement (pas « liste suivante »)
                 url = next?.takeIf { it.isNotBlank() && it != url && it.substringBefore('?').trimEnd('/') == href.substringBefore('?').trimEnd('/') }
+                if (next != null) Diag.log("     suivant proposé : $next → ${if (url != null) "suivi" else "ignoré"}")
             }
         }
         if (titles.isEmpty()) error("aucune histoire trouvée (favoris, bibliothèque et listes vides ou privés ; connecte-toi à l'étape 1)")

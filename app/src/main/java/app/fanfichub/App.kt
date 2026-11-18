@@ -190,6 +190,26 @@ class Hub(ctx: Context) {
         }
     }
 
+    var diagRunning by mutableStateOf(false); private set
+    /** Diagnostic Spirit : relit le compte en journalisant tout, puis propose de partager le rapport. */
+    fun runDiag() { if (diagRunning) return; diagRunning = true; scope.launch {
+        Diag.reset(); Diag.on = true
+        Diag.log("Fanfic Hub v$version · Android ${android.os.Build.VERSION.RELEASE} · ${android.os.Build.MODEL}")
+        val su = users["Spirit Fanfics"]
+        Diag.log("Compte Spirit : ${su ?: "aucun"}")
+        if (su != null) runCatching { Spirit.library(su, emptyMap()) }.onSuccess { l ->
+            Diag.log("\nRésultat : ${l.size} histoires")
+            l.flatMap { w -> w.sources.map { it to w } }.groupBy({ it.first }, { it.second }).forEach { (s, ws) ->
+                Diag.log("== $s (${ws.size}) : " + ws.take(25).joinToString(" ; ") { it.title.take(30) }) }
+        }.onFailure { Diag.log("ERREUR : ${it.message}") }
+        Diag.log("\nEn mémoire (Spirit) : " + works.filter { it.site == "Spirit Fanfics" }.flatMap { it.sources }.groupingBy { it }.eachCount())
+        Diag.on = false; diagRunning = false
+        val txt = Diag.text()
+        runCatching { (app.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(android.content.ClipData.newPlainText("diag", txt)) }
+        app.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, txt), "Rapport de diagnostic")
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    } }
+
     fun addToLibrary(w: Work) { update(w.copy(sources = setOf("Ajouté"))) }
 
     val listHits = mutableStateListOf<ListHit>()
@@ -306,6 +326,7 @@ class Hub(ctx: Context) {
         val old = works.associateBy { it.id }
         val seen = LinkedHashMap<String, Work>()
         fun add(w: Work) { seen[w.id] = seen[w.id]?.let { it.copy(sources = it.sources + w.sources) } ?: w }
+        val libIds = HashSet<String>() // fanfictions renvoyées par la bibliothèque d'un site (collections à jour)
         fun unchanged(w: Work) = old[w.id]?.let { it.chapters == w.chapters && it.updated == w.updated } == true
         fun publish() {
             val merged = LinkedHashMap<String, Work>()
@@ -313,8 +334,10 @@ class Hub(ctx: Context) {
             seen.values.forEach { f ->
                 val o = old[f.id]
                 val gained = if (o == null || o.chapters.startsWith("?") || f.chapters.startsWith("?")) 0 else maxOf(0, f.published - o.published)
-                merged[f.id] = if (o == null) f else if (f.chapters.startsWith("?") && !o.chapters.startsWith("?")) o.copy(sources = o.sources + f.sources) else f.copy(newChapters = o.newChapters + gained,
-                    progress = o.progress, lastRead = o.lastRead, sources = if (full) f.sources else o.sources + f.sources,
+                // Hors AO3, la bibliothèque du site fait foi : on remplace les collections (on garde seulement « Ajouté »)
+                val src = if (full || (f.site != "AO3" && f.id in libIds)) f.sources + o?.sources.orEmpty().filter { it == "Ajouté" } else o?.sources.orEmpty() + f.sources
+                merged[f.id] = if (o == null) f else if (f.chapters.startsWith("?") && !o.chapters.startsWith("?")) o.copy(sources = src) else f.copy(newChapters = o.newChapters + gained,
+                    progress = o.progress, lastRead = o.lastRead, sources = src,
                     checked = maxOf(f.checked, o.checked), cover = f.cover.ifEmpty { o.cover },
                     summary = f.summary.ifBlank { o.summary }, author = f.author.ifBlank { o.author })
             }
@@ -375,7 +398,7 @@ class Hub(ctx: Context) {
                 if (su != null) runCatching {
                     siteStatus.remove(s.name)
                     syncInfo = "${s.name} · bibliothèque…"; syncProgress = null
-                    val l = s.library(su, old); l.forEach { add(it) }; publish()
+                    val l = s.library(su, old); l.forEach { add(it); libIds += it.id }; publish()
                     siteStatus[s.name] = "${l.size} fanfictions synchronisées"
                 }.onFailure { e -> siteStatus[s.name] = if (old.values.any { it.site == s.name }) "Synchro partielle : ${e.message}" else "Erreur : ${e.message}" }
                 // Détails : fiches encore incomplètes (« ?/? ») et fanfictions suivies non terminées.
