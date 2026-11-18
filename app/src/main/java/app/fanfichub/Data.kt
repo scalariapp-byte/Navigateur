@@ -196,7 +196,7 @@ data class SearchQuery(
 
 /** Liste de lecture trouvée (Wattpad). */
 /** Titre inutilisable : identifiant (« one-piece-123 ») ou page d'erreur du navigateur intégré. */
-private val WEB_ERR = Regex("page web non disponible|webpage not available|page not found|p[áa]gina n[ãa]o (encontrada|dispon)|erro 40|error 40|just a moment", RegexOption.IGNORE_CASE)
+private val WEB_ERR = Regex("page web non disponible|webpage not available|page not found|p[áa]gina n[ãa]o (encontrada|dispon)|erro 40|error 40|just a moment|acessar sua conta|fa[çc]a login|sign in to|log in to", RegexOption.IGNORE_CASE)
 fun webError(t: String) = WEB_ERR.containsMatchIn(t)
 fun badTitle(t: String) = t.isBlank() || Regex("^[a-z0-9-]+-\\d+$").matches(t) || webError(t)
 

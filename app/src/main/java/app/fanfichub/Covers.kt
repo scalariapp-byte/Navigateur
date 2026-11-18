@@ -92,9 +92,9 @@ fun BookCover(w: Work, width: Int, modifier: Modifier = Modifier) {
         .background(Brush.linearGradient(listOf(c.copy(alpha = 0.95f), c.copy(alpha = 0.45f), Color(0xFF15151E))))) {
         Column(Modifier.fillMaxSize().padding(8.dp)) {
             Box(Modifier.size(width = 3.dp, height = 22.dp).background(Color.White.copy(alpha = 0.7f)))
+            // Le titre cède la place : l'auteur reste toujours visible en bas
             Text(w.title, color = Color.White, fontSize = (width / 8f).coerceIn(10f, 14f).sp, fontWeight = FontWeight.Bold, lineHeight = (width / 6.5f).coerceIn(12f, 17f).sp,
-                maxLines = 4, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
-            Spacer(Modifier.weight(1f))
+                maxLines = 4, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp).weight(1f))
             Text(w.author, color = Color.White.copy(alpha = 0.75f), fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (goodCover(w.cover) && w.site == "Spirit Fanfics") SpiritFace(w, width)
