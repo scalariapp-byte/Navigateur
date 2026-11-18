@@ -466,7 +466,9 @@ class Hub(ctx: Context) {
                             title = if (slugTitle(p)) inf.title else p.title, author = p.author.ifBlank { inf.author },
                             summary = inf.summary.ifBlank { p.summary }, cover = p.cover.takeIf { goodCover(it) } ?: inf.cover,
                             fandoms = if (p.fandoms.isEmpty() || p.fandoms == listOf(s.name)) inf.fandoms else p.fandoms,
-                            words = if (inf.words > 0) inf.words else p.words)
+                            // La fiche de liste (Spirit, FF.net) est plus fiable que la page : on garde ses chiffres
+                            words = if (p.words > 0) p.words else inf.words,
+                            chapters = if (p.chapters.startsWith("?") || p.chapters.isBlank()) inf.chapters else p.chapters, complete = p.complete || inf.complete)
                     }
                     if (i % 4 == 3) publish()
                 }

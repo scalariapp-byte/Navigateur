@@ -763,7 +763,9 @@ object Spirit : Site {
         val title = raw.split(Regex(" - Hist[óo]ria| - Spirit| \\| ", ic))[0].trim().takeIf { it.isNotBlank() && it != s } ?: pretty(s)
         val author = Regex("escrita por ([^-|]+)", ic).find(head)?.groupValues?.get(1)?.trim()
             ?: d.selectFirst("[itemprop=author], .autor a, a[rel=author]")?.text()?.trim() ?: ""
-        val n = maxOf(chapters(d, s).size, Regex("(\\d+)\\s+cap[ií]tulos?", ic).find(body)?.groupValues?.get(1)?.toIntOrNull() ?: 0).coerceAtLeast(1)
+        // Nombre annoncé par la page en priorité ; sinon les liens de chapitres (hors commentaires, avis…)
+        val n = (Regex("(\\d+)\\s+cap[ií]tulos?", ic).find(body)?.groupValues?.get(1)?.toIntOrNull()
+            ?: chapters(d, s).count { !Regex("coment|review|avis|favorit|denunci|capitulos$|lista", ic).containsMatchIn(it.first) }).coerceAtLeast(1)
         val done = Regex("Conclu[ií]da|Terminada|Completa", ic).containsMatchIn(body)
         return Work("sp:$s", title, author, listOf(d.selectFirst("a[href*=/categorias/]")?.text() ?: name), "",
             digits(Regex("([\\d.]+)\\s+palavras", ic).find(body)?.groupValues?.get(1)),
