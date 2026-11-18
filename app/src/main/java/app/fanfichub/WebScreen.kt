@@ -36,6 +36,12 @@ import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewFeature
 
 /** Masque les encarts d'inscription, recommandations, pieds de page et bannières (relancé quand la page change). */
+private val AD_HOSTS = listOf("googletagmanager.com", "google-analytics.com", "googlesyndication.com", "doubleclick.net", "googleadservices.com",
+    "adservice.google.com", "amazon-adsystem.com", "scorecardresearch.com", "quantserve.com", "facebook.net", "connect.facebook.net", "criteo.com",
+    "criteo.net", "taboola.com", "outbrain.com", "adnxs.com", "pubmatic.com", "rubiconproject.com", "openx.net", "moatads.com", "chartbeat.com",
+    "hotjar.com", "sentry.io", "cdn.permutive.com", "permutive.com", "adsafeprotected.com", "casalemedia.com", "teads.tv", "33across.com", "sharethrough.com",
+    "smartadserver.com", "yieldmo.com", "media.net", "gumgum.com", "indexww.com", "lijit.com", "sovrn.com", "id5-sync.com", "btloader.com", "fundingchoicesmessages.google.com")
+
 /** Feuille de style de lecture aux couleurs et à la taille choisies. */
 private fun readJs(hub: Hub): String {
     val (_, bg, fg) = THEMES[hub.theme.coerceIn(0, THEMES.size - 1)]
@@ -57,8 +63,9 @@ private const val READ_JS = """(function(){var s=document.getElementById('fhread
 '#storycontent,.panel-reading,[class*=texto],[class*=part-content]{max-width:720px!important;margin:0 auto!important;padding:0 18px!important}'+
 '[id*=banner],[class*=app-banner],[class*=AppBanner],[class*=download-app],[class*=sticky-header],.t_head,#top_menu{display:none!important}'+
 'blockquote{margin:0 0 1em!important;padding:0 0 0 10px!important}.preface,.notes,.summary{padding:0 14px!important}'+
-'.fhfold{display:none!important}.fhmore{color:#b9a7ff;font-size:14px;font-weight:bold;padding:6px 0 12px;cursor:pointer}';
-if(!s.parentNode)document.head.appendChild(s);
+'p.jump{display:none!important}.fhfold{display:none!important}.fhmore{color:#b9a7ff;font-size:14px;font-weight:bold;padding:6px 0 12px;cursor:pointer}';
+if(!s.parentNode)(document.head||document.documentElement).appendChild(s);
+document.querySelectorAll('.notes').forEach(function(n){if(!n.querySelector('blockquote')&&n.querySelector('p.jump'))n.style.display='none'});
 // Résumé et notes repliés : « Tout afficher » pour déplier
 document.querySelectorAll('.preface .summary blockquote,.preface .notes blockquote,#work_endnotes blockquote,.end.notes blockquote,[class*=notas]').forEach(function(b){
  if(b.__fh)return;b.__fh=1;b.classList.add('fhfold');var m=document.createElement('div');m.className='fhmore';m.textContent='Afficher ▾';
@@ -160,13 +167,21 @@ fun WebScreen(hub: Hub, url: String, title: String) {
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
                 settings.userAgentString = BROWSER_UA
+                settings.offscreenPreRaster = true
                 if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) WebSettingsCompat.setAlgorithmicDarkeningAllowed(settings, true)
                 webViewClient = object : WebViewClient() {
                     override fun shouldOverrideUrlLoading(v: WebView, r: WebResourceRequest) = !r.url.scheme.orEmpty().startsWith("http")
                     override fun doUpdateVisitedHistory(v: WebView, u: String?, reload: Boolean) { canBack = v.canGoBack() }
+                    // Pubs et traqueurs bloqués : pages bien plus rapides
+                    override fun shouldInterceptRequest(v: WebView, r: WebResourceRequest): android.webkit.WebResourceResponse? {
+                        val h = r.url.host.orEmpty()
+                        return if (AD_HOSTS.any { h == it || h.endsWith(".$it") }) android.webkit.WebResourceResponse("text/plain", "utf-8", java.io.ByteArrayInputStream(ByteArray(0))) else null
+                    }
+                    // Style appliqué dès que la page devient visible (pas d'éclair de l'ancienne mise en page)
+                    override fun onPageCommitVisible(v: WebView, u: String?) { v.evaluateJavascript(readJs(hub), null) }
                     override fun onPageFinished(v: WebView, u: String?) {
                         v.evaluateJavascript(readJs(hub), null); v.evaluateJavascript(CLEAN_JS, null)
-                        if ((hub.webFr || hub.autoTr) && tr != "0 %") { tr = "0 %"; v.postDelayed({ v.evaluateJavascript(TR_JS, null) }, 600) }
+                        if ((hub.webFr || hub.autoTr) && tr != "0 %") { tr = "0 %"; v.post { v.evaluateJavascript(TR_JS, null) } }
                     }
                 }
                 webChromeClient = object : WebChromeClient() { override fun onProgressChanged(v: WebView, p: Int) { progress = p } }
