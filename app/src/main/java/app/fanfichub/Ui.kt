@@ -16,6 +16,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -805,37 +806,15 @@ fun Detail(hub: Hub, id: String) {
             }
             item {
                 Column(Modifier.padding(horizontal = 20.dp)) {
-                    GradButton(when {
-                        busy -> "Téléchargement…"
-                        w.progress > 0.01f -> "Continuer · ${(w.progress * 100).toInt()} %"
-                        else -> "Commencer la lecture"
-                    }) {
-                        if (busy) return@GradButton
-                        if (hub.hasText(id) && w.newChapters == 0) hub.push(Screen.Reader(id))
-                        else hub.scope.launch {
-                            busy = true; err = null
-                            try { hub.download(id); hub.push(Screen.Reader(id)) } catch (e: Exception) { err = e.message ?: "Erreur réseau" }
-                            busy = false
-                        }
-                    }
-                    err?.let { Text(it, color = Color(0xFFF87171), fontSize = 14.sp, modifier = Modifier.padding(top = 10.dp)) }
+                    GradButton("Lire") { hub.push(Screen.Web(w.link, w.title)) }
                     if (!hub.inLibrary(id)) { Spacer(Modifier.height(10.dp)); GhostButton("+ Ajouter à ma bibliothèque") { hub.addToLibrary(w) } }
-                    Spacer(Modifier.height(10.dp))
-                    GhostButton("Lire sur ${w.site} (dans l'app)") { hub.push(Screen.Web(w.link, w.title)) }
                     if (w.summary.isNotBlank()) {
+                        // Résumé seul ; traduit si la traduction auto est active. Toucher le texte bascule VO / FR.
                         var showFr by remember(id) { mutableStateOf(hub.autoTr) }
                         var pre by remember(id) { mutableStateOf<String?>(null) } // préchargé, jamais enregistré
                         LaunchedEffect(id) { runCatching { Translator.texts(listOf(w.summary)).first() }.onSuccess { pre = it } }
-                        val sumFr = if (showFr) pre else null
-                        val sumBusy = showFr && pre == null && !hub.autoTr
-                        Row(Modifier.padding(top = 28.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("Résumé", color = Txt, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                            FilterPill(if (sumBusy) "Traduction…" else if (sumFr != null) "VO" else "Traduire", sumFr == null) {
-                                showFr = !showFr
-                            }
-                        }
-                        if (showFr && pre != null) Text("Traduit automatiquement", color = A1, fontSize = 12.sp, modifier = Modifier.padding(bottom = 4.dp))
-                        Text(sumFr ?: w.summary, color = Sub, fontSize = 15.sp, lineHeight = 23.sp)
+                        Text((if (showFr) pre else null) ?: w.summary, color = Sub, fontSize = 15.sp, lineHeight = 23.sp,
+                            modifier = Modifier.padding(top = 22.dp).clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { showFr = !showFr })
                     }
                     if (w.tags.isNotEmpty()) {
                         Text("Tags", color = Txt, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 26.dp, bottom = 10.dp))
