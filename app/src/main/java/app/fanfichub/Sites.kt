@@ -516,7 +516,15 @@ object Ffn : Site {
     /** Résumé d'une entrée de liste : le texte du bloc moins le titre, « by Auteur » et la ligne de stats. */
     private fun ffnSummary(box: org.jsoup.nodes.Element, title: String, meta: String): String {
         box.selectFirst(".z-indent, .z-padtop")?.ownText()?.trim()?.takeIf { it.length > 20 }?.let { return it }
-        var t = box.text().replace(meta, " ").replace(title, " ")
+        // Quand la ligne de stats n'a pas de bloc à part, « meta » vaut tout le texte : on coupe alors avant « rated: »
+        var t = if (meta.isNotBlank() && meta != box.text()) box.text().replace(meta, " ") else {
+            val full = box.text(); val m = Regex("(?i)\\brated:").find(full)
+            if (m == null) full else full.substring(0, m.range.first).let { pre ->
+                // la ligne de stats commence par le fandom (« One Piece & Jujutsu Kaisen, rated: … »)
+                val fandom = full.substring(m.range.first).let { _ -> pre.substringAfterLast(". ", "").takeIf { it.length in 2..80 && !it.contains("!") } }
+                if (fandom != null) pre.removeSuffix(fandom).trimEnd(',', ' ') else pre.trimEnd(',', ' ') }
+        }
+        t = t.replace(title, " ")
         box.select("a[href^=/u/]").forEach { t = t.replace("by " + it.text(), " ").replace(it.text(), " ") }
         return t.replace(Regex("\\s+"), " ").trim().replace(Regex("^(\\d[\\d,.]*\\s*)?[»·\\-\\s]*"), "").trim().takeIf { it.length > 20 } ?: ""
     }
