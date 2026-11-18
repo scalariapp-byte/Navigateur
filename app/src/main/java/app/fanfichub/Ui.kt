@@ -483,7 +483,7 @@ fun Library(hub: Hub) {
                         .clickable(enabled = sel.isNotEmpty()) { hub.hide(sel.toSet()); sel.clear() }.padding(horizontal = 16.dp, vertical = 9.dp))
             }
         }
-        if (hub.canUndo || hub.canRedo || hub.hidden.isNotEmpty()) item {
+        if (selecting && (hub.canUndo || hub.canRedo || hub.hidden.isNotEmpty())) item {
             Row(Modifier.padding(start = 20.dp, end = 20.dp, top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (hub.canUndo) FilterPill("↶ Annuler", false) { hub.undo() }
                 if (hub.canRedo) FilterPill("↷ Rétablir", false) { hub.redo() }
