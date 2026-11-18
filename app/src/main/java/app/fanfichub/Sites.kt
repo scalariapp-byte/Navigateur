@@ -613,25 +613,38 @@ object Spirit : Site {
 
     suspend fun searchStories(q: String, page: Int, filters: Map<String, String> = emptyMap()): List<Work> {
         val extra = filters.filterValues { it.isNotBlank() }.entries.joinToString("") { "&" + URLEncoder.encode(it.key, "UTF-8") + "=" + URLEncoder.encode(it.value, "UTF-8") }
-        val d = Web.html("$B/busca?query=${URLEncoder.encode(q.trim(), "UTF-8")}&pagina=$page$extra", "ui")
+        return cards(Web.html("$B/busca?query=${URLEncoder.encode(q.trim(), "UTF-8")}&pagina=$page$extra", "ui"), "Recherche")
+    }
+
+    /** Un texte de lien qui ressemble à une adresse ou à un identifiant (« one-piece-luffy-123 ») n'est pas un titre. */
+    private fun slugLike(t: String) = t.isBlank() || (!t.trim().contains(' ') && t.contains('-')) || t.startsWith("http")
+
+    /**
+     * Fiches d'histoires d'une page Spirit (recherche, listes de lecture, favoris) : chaque fiche contient
+     * « escrita por », et donne titre, auteur, statut, chapitres, mots, catégories, résumé et image.
+     * Les liens hors fiche (barre latérale, suggestions) sont ignorés.
+     */
+    private fun cards(d: Document, src: String): List<Work> {
         val ic = RegexOption.IGNORE_CASE
         val out = LinkedHashMap<String, Work>()
         d.select("a[href*=/historia/]").forEach { a ->
             val sl = slug(a.attr("href")) ?: return@forEach
-            if (Regex("/historia/$sl/").containsMatchIn(a.attr("href")) || a.text().isBlank() || "sp:$sl" in out) return@forEach
-            val box = generateSequence(a.parent()) { it.parent() }.firstOrNull { e ->
+            if (Regex("/historia/$sl/").containsMatchIn(a.attr("href")) || "sp:$sl" in out) return@forEach
+            val box = generateSequence(a.parent()) { it.parent() }.take(8).firstOrNull { e ->
                 e.text().contains("escrita por", true) && e.select("a[href*=/historia/]").mapNotNull { slug(it.attr("href")) }.distinct().size <= 1
-            } ?: a.parent() ?: return@forEach
+            } ?: return@forEach
             val t = box.text()
+            val title = box.select("a[href*=/historia/$sl]").map { it.text().trim() }.filter { !slugLike(it) }.maxByOrNull { it.length }
+                ?: box.selectFirst("img")?.attr("alt")?.takeIf { !slugLike(it) } ?: pretty(sl)
             val n = Regex("Cap[ií]tulos\\s+(\\d+)", ic).find(t)?.groupValues?.get(1)?.toIntOrNull() ?: 1
             val done = Regex("Conclu[ií]d[ao]", ic).containsMatchIn(t)
             val cat = Regex("Categorias\\s+(.+?)(?:\\s+G[êe]neros|\\s+Personagens|$)", ic).find(t)?.groupValues?.get(1)?.trim()?.take(80) ?: name
             val summary = box.select("p, div").filter { it.children().isEmpty() || it.tagName() == "p" }.map { it.text() }
                 .filter { it.length > 60 && !it.contains("escrita por", true) && !it.startsWith("Categorias") && !it.startsWith("Gêneros") }.maxByOrNull { it.length } ?: ""
             val im = box.selectFirst("img")?.let { it.absUrl("data-src").ifBlank { it.absUrl("src") } } ?: ""
-            out["sp:$sl"] = Work("sp:$sl", a.text(), Regex("escrita por\\s+(\\S+)", ic).find(t)?.groupValues?.get(1) ?: "", listOf(cat.substringBefore(",").trim()), "",
+            out["sp:$sl"] = Work("sp:$sl", title, Regex("escrita por\\s+(\\S+)", ic).find(t)?.groupValues?.get(1) ?: "", listOf(cat.substringBefore(",").trim()), "",
                 digits(Regex("Palavras\\s+([\\d.]+)", ic).find(t)?.groupValues?.get(1)), "$n/${if (done) n else "?"}",
-                0, summary, emptyList(), Regex("Atualizada\\s+(.+?)\\s+Idioma", ic).find(t)?.groupValues?.get(1) ?: "", done, setOf("Recherche"),
+                0, summary, emptyList(), Regex("Atualizada(?: em)?\\s+(.+?)\\s+Idioma", ic).find(t)?.groupValues?.get(1) ?: "", done, setOf(src),
                 site = name, url = "$B/historia/$sl", cover = im.takeIf { it.startsWith("http") } ?: "", checked = System.currentTimeMillis())
         }
         return out.values.toList()
@@ -672,11 +685,19 @@ object Spirit : Site {
         val titles = LinkedHashMap<String, String>()          // slug -> titre
         val sources = LinkedHashMap<String, MutableSet<String>>() // slug -> collections
         val covers = HashMap<String, String>()
+        val full = HashMap<String, Work>() // fiches complètes (titre, auteur, résumé, image)
         fun addStories(d: Document, src: String) {
+            val c = cards(d, src)
+            if (c.isNotEmpty()) {
+                // Page en fiches : seules les vraies fiches comptent (pas la barre latérale ni les suggestions)
+                c.forEach { w -> val sl = w.id.removePrefix("sp:"); full.putIfAbsent(sl, w); titles[sl] = w.title
+                    sources.getOrPut(sl) { mutableSetOf() } += src; if (w.cover.isNotBlank()) covers.putIfAbsent(sl, w.cover) }
+                return
+            }
             d.select("a[href*=/historia/]").forEach { a ->
                 val sl = slug(a.attr("href")) ?: return@forEach
                 if (Regex("/historia/$sl/").containsMatchIn(a.attr("href"))) return@forEach // lien de chapitre
-                if (titles[sl].isNullOrBlank() && a.text().isNotBlank()) titles[sl] = a.text() else titles.putIfAbsent(sl, "")
+                if (titles[sl].isNullOrBlank() && !slugLike(a.text())) titles[sl] = a.text().trim() else titles.putIfAbsent(sl, "")
                 sources.getOrPut(sl) { mutableSetOf() } += src
                 val im = (a.selectFirst("img") ?: a.parent()?.selectFirst("img"))?.let { it.absUrl("data-src").ifBlank { it.absUrl("src") } }
                 if (!im.isNullOrBlank() && im.startsWith("http") && sl !in covers) covers[sl] = im
@@ -711,8 +732,14 @@ object Spirit : Site {
         if (titles.isEmpty()) error("aucune histoire trouvée (favoris, bibliothèque et listes vides ou privés ; connecte-toi à l'étape 1)")
         return titles.map { (sl, t) ->
             val src = sources[sl] ?: mutableSetOf("Favori")
-            known["sp:$sl"]?.let { k -> k.copy(sources = src, cover = k.cover.ifEmpty { covers[sl] ?: "" }) }
-                ?: Work("sp:$sl", t.ifBlank { sl.substringBeforeLast('-').replace('-', ' ') }, "", listOf(name), "", 0, "?/?", 0, "", emptyList(), "", false, src,
+            val f = full[sl]
+            known["sp:$sl"]?.let { k -> k.copy(sources = src, cover = k.cover.ifEmpty { covers[sl] ?: "" },
+                title = if (slugLike(k.title) || k.title.replace(' ', '-').startsWith(sl.substringBeforeLast('-').take(12))) (f?.title ?: t.ifBlank { pretty(sl) }) else k.title,
+                author = k.author.ifBlank { f?.author ?: "" }, summary = k.summary.ifBlank { f?.summary ?: "" },
+                fandoms = if (k.fandoms == listOf(name)) f?.fandoms ?: k.fandoms else k.fandoms,
+                chapters = if (k.chapters.startsWith("?")) f?.chapters ?: k.chapters else k.chapters, words = if (k.words == 0) f?.words ?: 0 else k.words) }
+                ?: f?.copy(sources = src)
+                ?: Work("sp:$sl", t.ifBlank { pretty(sl) }, "", listOf(name), "", 0, "?/?", 0, "", emptyList(), "", false, src,
                     site = name, url = "$B/historia/$sl", cover = covers[sl] ?: "")
         }
     }
