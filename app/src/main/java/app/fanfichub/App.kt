@@ -224,13 +224,14 @@ class Hub(ctx: Context) {
     private val detailing = HashSet<String>()
     /** À l'ouverture d'une fiche sans résumé : va chercher la page de l'histoire et complète (résumé, mots, chapitres). */
     fun ensureDetails(w: Work) {
-        if (w.summary.isNotBlank() || !detailing.add(w.id)) return
+        if ((w.summary.isNotBlank() && !badTitle(w.title)) || !detailing.add(w.id)) return
         val site = Sites.all.firstOrNull { it.name == w.site } ?: return
         scope.launch {
             runCatching { withContext(Dispatchers.IO) { site.info(w.link, "ui") } }.getOrNull()?.let { inf ->
                 val cur = work(w.id) ?: w
                 val upd = cur.copy(summary = inf.summary.ifBlank { cur.summary }, words = if (inf.words > 0) inf.words else cur.words,
-                    author = cur.author.ifBlank { inf.author }, cover = cur.cover.takeIf { goodCover(it) } ?: inf.cover)
+                    author = cur.author.ifBlank { inf.author }, cover = cur.cover.takeIf { goodCover(it) } ?: inf.cover,
+                    title = if (badTitle(cur.title)) inf.title else cur.title)
                 if (works.any { it.id == w.id }) update(upd) else { val i = results.indexOfFirst { it.id == w.id }; if (i >= 0) results[i] = upd }
             }
         }
@@ -429,7 +430,7 @@ class Hub(ctx: Context) {
                 }.onFailure { e -> siteStatus[s.name] = if (old.values.any { it.site == s.name }) "Synchro partielle : ${e.message}" else "Erreur : ${e.message}" }
                 // Détails : fiches encore incomplètes (« ?/? ») et fanfictions suivies non terminées.
                 fun noSummary(w: Work) = w.summary.isBlank() && old[w.id]?.summary.isNullOrBlank() && !(quick && (old[w.id]?.let { now - it.checked < 3 * 3_600_000L } == true))
-                fun slugTitle(w: Work) = Regex("^[a-z0-9-]+-\\d+$").matches(w.title)
+                fun slugTitle(w: Work) = badTitle(w.title)
                 val targets = (seen.values.filter { it.site == s.name && (it.chapters.startsWith("?") || noSummary(it) || slugTitle(old[it.id] ?: it)) } +
                     old.values.filter { it.site == s.name && it.id !in seen && (full || !it.complete) && !fresh(it) }).distinctBy { it.id }
                 targets.forEachIndexed { i, w ->

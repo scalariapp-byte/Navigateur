@@ -518,13 +518,14 @@ object Ffn : Site {
         box.selectFirst(".z-indent, .z-padtop")?.ownText()?.trim()?.takeIf { it.length > 20 }?.let { return it }
         var t = box.text().replace(meta, " ").replace(title, " ")
         box.select("a[href^=/u/]").forEach { t = t.replace("by " + it.text(), " ").replace(it.text(), " ") }
-        return t.replace(Regex("\\s+"), " ").trim().trimStart('»', '-', '·', ' ').takeIf { it.length > 20 } ?: ""
+        return t.replace(Regex("\\s+"), " ").trim().replace(Regex("^(\\d[\\d,.]*\\s*)?[»·\\-\\s]*"), "").trim().takeIf { it.length > 20 } ?: ""
     }
     private fun metaDesc(d: Document) = (d.selectFirst("meta[name=description]")?.attr("content") ?: d.selectFirst("meta[property=og:description]")?.attr("content") ?: "").trim()
 
     override suspend fun info(url: String, lane: String): Work? {
         val id = Regex("/s/(\\d+)").find(url)?.groupValues?.get(1) ?: return null
         val d = Web.html("$M/s/$id/1/", lane)
+        if (webError(d.title())) error("page indisponible (${d.title()})")
         val text = d.text()
         if (!Regex("chapters?:|words?:|rated:", IC).containsMatchIn(text)) error("page FanFiction.net illisible (vérification anti-robot ?)")
         // Titre de page : « Titre Chapter 1, a Naruto fanfic | FanFiction »
@@ -666,7 +667,7 @@ object Spirit : Site {
 
     override suspend fun probe(user: String): String {
         val u = URLEncoder.encode(user.trim(), "UTF-8")
-        val prof = Web.html("$B/perfil/$u/listas", "ui")
+        val prof = Web.html("$B/perfil/$u", "ui")
         val list = prof.select("a[href*=/listas/]").map { it.absUrl("href") }.firstOrNull { Regex("/listas/[^/?#]+-\\d+").containsMatchIn(it) }
             ?: return "  sonde : aucune liste sur « ${prof.title().take(50)} »"
         val d = Web.html(list, "ui")
@@ -682,7 +683,7 @@ object Spirit : Site {
     }
 
     /** Un texte de lien qui ressemble à une adresse ou à un identifiant (« one-piece-luffy-123 ») n'est pas un titre. */
-    private fun slugLike(t: String) = t.isBlank() || (!t.trim().contains(' ') && t.contains('-')) || t.startsWith("http")
+    private fun slugLike(t: String) = t.isBlank() || (!t.trim().contains(' ') && t.contains('-')) || t.startsWith("http") || webError(t)
 
     /**
      * Fiches d'histoires d'une page Spirit (recherche, listes de lecture, favoris) : chaque fiche contient
@@ -718,11 +719,16 @@ object Spirit : Site {
         return out.values.toList()
     }
 
+    /** Retire l'en-tête « Confira a história … escrita por Auteur. » ajouté par Spirit. */
+    private fun spiritDesc(s: String) = s.replace(Regex("^\\s*Confira a hist[óo]ria .*? escrita por \\S+?\\.\\s*", RegexOption.IGNORE_CASE), "")
+        .replace(Regex("\\s*Ver sinopse\\s*$", RegexOption.IGNORE_CASE), "").trim()
+
     private fun pretty(sl: String) = sl.substringBeforeLast('-').replace('-', ' ').replaceFirstChar { it.uppercase() }
 
     override suspend fun info(url: String, lane: String): Work? {
         val s = slug(url) ?: return null
         val d = Web.html("$B/historia/$s", lane)
+        if (webError(d.title())) error("page indisponible (${d.title()})")
         val body = d.text()
         val ic = RegexOption.IGNORE_CASE
         val og = d.selectFirst("meta[property=og:title]")?.attr("content").orEmpty()
@@ -736,7 +742,8 @@ object Spirit : Site {
         val done = Regex("Conclu[ií]da|Terminada|Completa", ic).containsMatchIn(body)
         return Work("sp:$s", title, author, listOf(d.selectFirst("a[href*=/categorias/]")?.text() ?: name), "",
             digits(Regex("([\\d.]+)\\s+palavras", ic).find(body)?.groupValues?.get(1)),
-            "$n/${if (done) n else "?"}", 0, (d.selectFirst("meta[name=description]")?.attr("content") ?: d.selectFirst("meta[property=og:description]")?.attr("content") ?: "").trim(),
+            "$n/${if (done) n else "?"}", 0, spiritDesc(d.selectFirst("[class*=sinopse], [class*=resumo]")?.text()?.takeIf { it.length > 40 }
+                ?: d.selectFirst("meta[name=description]")?.attr("content") ?: d.selectFirst("meta[property=og:description]")?.attr("content") ?: ""),
             emptyList(), "", done, setOf("Favori"), site = name, url = "$B/historia/$s",
             cover = d.selectFirst("meta[property=og:image]")?.attr("content") ?: "", checked = System.currentTimeMillis())
     }
