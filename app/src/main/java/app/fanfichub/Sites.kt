@@ -573,8 +573,10 @@ object Ffn : Site {
         }
         // Couvertures : seulement sur la version ordinateur du profil (une seule page pour tous les favoris)
         if (out.isNotEmpty()) runCatching { Web.html("$B/u/$uid/", "pc") }.getOrNull()?.select("div.z-list[data-storyid]")?.forEach { e ->
-            val k = e.attr("data-storyid"); val c = img(e.selectFirst("img")); val w = out[k]
-            if (w != null && c.isNotBlank()) out[k] = w.copy(cover = c)
+            val k = e.attr("data-storyid"); val c = img(e.selectFirst("img")); val w = out[k] ?: return@forEach
+            // Fandom lisible sur la version ordinateur : « Crossover - One Piece & RWBY - Rated: … »
+            val fd = e.selectFirst(".z-padtop2, .xgray")?.text()?.substringBefore(" - Rated")?.removePrefix("Crossover - ")?.trim()?.takeIf { it.length in 2..90 }
+            out[k] = w.copy(cover = c.ifBlank { w.cover }, fandoms = if (fd != null && (w.fandoms.isEmpty() || w.fandoms == listOf(name))) listOf(fd) else w.fandoms)
         }
         if (out.isEmpty()) {
             // Repli : version ordinateur (blocs « favstories » avec attributs data-*)
