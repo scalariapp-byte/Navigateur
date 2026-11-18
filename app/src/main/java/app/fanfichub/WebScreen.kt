@@ -52,7 +52,7 @@ private fun readJs(hub: Hub): String {
 /** Mise en page de lecture : fond sombre, texte large et aéré, barres/bannières/pubs masquées (AO3, FF.net, Wattpad, Spirit). */
 private const val READ_JS = """(function(){var s=document.getElementById('fhread')||document.createElement('style');s.id='fhread';s.textContent=
 'html,body{background:BGC!important;color:FGC!important}'+
-'#kudos,#add_comment_placeholder,#comments_placeholder,#new_comment,.new_comment,[id^=add_comment],#show_comments_link,#show_comments_link_top,li.collections,.kudos,#feedback .comment,#feedback h3.landmark,.announcement,[class*=announcement],#admin-banner,.admin-banner,header,nav,#header,#footer,#skiplinks,.landmark,.notice,ul.work.navigation.actions,dl.work.meta,#top,.lc-wrapper,#p_footer,.navbar,#smartbanner,.smartbanner,[class*=smartbanner],[class*=Advertisement],[class*=advert],[class*=ad-container],[data-testid*=ad],[id*=google_ads],.adsbygoogle{display:none!important}'+
+'#kudos,#add_comment_placeholder,#comments_placeholder,#new_comment,.new_comment,[id^=add_comment],#show_comments_link,#show_comments_link_top,li.collections,.kudos,#feedback .comment,#feedback h3.landmark,.announcement,[class*=announcement],#admin-banner,.admin-banner,header,nav,#header,#footer,#skiplinks,.landmark,.notice,ul.work.navigation.actions,dl.work.meta,.lc-wrapper,#p_footer,.navbar,#smartbanner,.smartbanner,[class*=smartbanner],[class*=Advertisement],[class*=advert],[class*=ad-container],[data-testid*=ad],[id*=google_ads],.adsbygoogle{display:none!important}'+
 '#chapters,.userstuff,#storytext,#storycontent,.texto,#texto,#conteudoTexto,.part-content,pre{max-width:720px!important;margin:0 auto!important;padding:0 18px!important;background:transparent!important}'+
 '#chapters p,.userstuff p,#storytext p,#storytext,#storycontent p,.texto p,#texto p,#conteudoTexto p,.part-content p,pre p{font-family:Georgia,"Noto Serif",serif!important;font-size:SIZEpx!important;line-height:1.8!important;color:FGC!important;margin:0 0 1.05em!important;text-align:left!important}'+
 'h1,h2,h3,.title{color:FGC!important;line-height:1.3!important}a{color:#b9a7ff!important}img{max-width:100%!important;height:auto!important}'+
@@ -61,7 +61,7 @@ private const val READ_JS = """(function(){var s=document.getElementById('fhread
 'div,section,article,main,pre,td,center{background-color:transparent!important;color:FGC!important;border-color:rgba(128,128,128,.25)!important}'+
 'p,[data-p-id],#storycontent,#storycontent p,[class*=texto] p,[class*=capitulo] p,.panel-reading p,pre{font-family:Georgia,"Noto Serif",serif!important;font-size:SIZEpx!important;line-height:1.8!important;color:FGC!important;white-space:normal!important}'+
 '#storycontent,.panel-reading,[class*=texto],[class*=part-content]{max-width:720px!important;margin:0 auto!important;padding:0 18px!important}'+
-'[id*=banner],[class*=app-banner],[class*=AppBanner],[class*=download-app],[class*=sticky-header],.t_head,#top_menu{display:none!important}'+
+'[id*=banner],[class*=app-banner],[class*=AppBanner],[class*=download-app],[class*=sticky-header]{display:none!important}'+
 'blockquote{margin:0 0 1em!important;padding:0 0 0 10px!important}.preface,.notes,.summary{padding:0 14px!important}'+
 'p.jump{display:none!important}.fhfold{display:none!important}.fhmore{color:#b9a7ff;font-size:14px;font-weight:bold;padding:6px 0 12px;cursor:pointer}';
 if(!s.parentNode)(document.head||document.documentElement).appendChild(s);
@@ -73,7 +73,7 @@ document.querySelectorAll('.preface .summary blockquote,.preface .notes blockquo
 })()"""
 
 private const val CLEAN_JS = """(function(){
-var P=['Rejoins la plus grande','Join the largest','Cela pourrait aussi te plaire','You may also like','Télécharger l','Download the','Essayer Premium','Try Premium','Signaler cette histoire','Report this story','Directives du Contenu','Content Guidelines','Partenariats avec','Ouvrir dans l','Open in app','Inscris-toi','Sign up','Cadastre-se','Baixe o app','Baixar','Gratuito - em Google Play','Just In Community','Advertisement','Publicité'];
+var P=['Rejoins la plus grande','Join the largest','Cela pourrait aussi te plaire','You may also like','Télécharger l','Download the','Essayer Premium','Try Premium','Signaler cette histoire','Report this story','Directives du Contenu','Content Guidelines','Partenariats avec','Ouvrir dans l','Open in app','Inscris-toi','Sign up','Cadastre-se','Baixe o app'];
 function hide(e){if(e&&e.style)e.style.setProperty('display','none','important')}
 function clean(){
  document.querySelectorAll('footer,[role=contentinfo],[id*=cookie],[class*=cookie],[class*=Cookie],[id*=onetrust],ins,iframe').forEach(hide);
