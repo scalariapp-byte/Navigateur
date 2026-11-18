@@ -32,6 +32,7 @@ sealed interface Screen {
     data class Reader(val id: String) : Screen
     data class Web(val url: String, val title: String) : Screen
     data class Setup(val site: String) : Screen
+    data object Extensions : Screen
 }
 
 class Hub(ctx: Context) {
@@ -172,7 +173,8 @@ class Hub(ctx: Context) {
                     "Wattpad" -> Wattpad.searchStories(q.text, (searchPage - 1) * 20)
                     "FanFiction.net" -> Ffn.searchStories(q.text, searchPage)
                     "Spirit Fanfics" -> Spirit.searchStories(q.text, searchPage, q.spirit.mapValues { it.value.first })
-                    else -> withContext(Dispatchers.IO) { Ao3.search(q, searchPage) }
+                    "AO3" -> withContext(Dispatchers.IO) { Ao3.search(q, searchPage) }
+                    else -> Ext.byName(q.site)?.search(q.text, searchPage) ?: emptyList()
                 }
                 // Filtres appliqués par l'app quand le site ne les propose pas
                 var list = raw.filter { w ->
@@ -372,7 +374,7 @@ class Hub(ctx: Context) {
         awaitLoad()
         val now = System.currentTimeMillis()
         fun fresh(w: Work) = quick && now - w.checked < 3 * 3_600_000L
-        val u = user.takeIf { only == null || only == "AO3" }
+        val u = user.takeIf { (only == null || only == "AO3") && Ext.on("AO3") }
         if (only != null && account(only) == null && works.none { it.site == only }) { syncInfo = "Configure d'abord ton compte $only"; return }
         if (u == null && users.isEmpty() && works.none { it.site != "AO3" }) { syncInfo = "Connecte un compte pour synchroniser"; return }
         if (syncing) return
@@ -537,6 +539,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         Web.app = applicationContext
         Img.dir = java.io.File(cacheDir, "img").apply { mkdirs() }
+        Ext.init(this)
         hub = Hub(this)
         handle(intent)
         setContent { HubApp(hub) }

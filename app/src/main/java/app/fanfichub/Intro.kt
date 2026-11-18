@@ -143,7 +143,7 @@ private fun ShelfScene(counts: Map<String, Int>, auto: String?, header: Boolean,
         // Volumes
         Row(Modifier.fillMaxWidth().offset(y = booksBottom - 252.dp).height(252.dp), horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
             verticalAlignment = Alignment.Bottom) {
-            BOOKS.forEach { b ->
+            BOOKS.filter { Ext.on(it.site) }.forEach { b ->
                 val me = b.site == falling
                 Box(Modifier.graphicsLayer {
                     if (me) {
@@ -211,7 +211,7 @@ fun ShelfStrip(hub: Hub) {
         Plank(Modifier.align(Alignment.BottomCenter).padding(horizontal = 18.dp))
         Row(Modifier.fillMaxWidth().align(Alignment.BottomCenter).padding(bottom = 34.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.Bottom) {
-            BOOKS.forEach { b ->
+            BOOKS.filter { Ext.on(it.site) }.forEach { b ->
                 Box(Modifier.clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { hub.openSite(b.site) }) {
                     MangaSpine(b.site, b.w, b.h, hub.works.count { it.site == b.site })
                 }

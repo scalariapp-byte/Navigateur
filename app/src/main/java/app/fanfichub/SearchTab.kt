@@ -148,6 +148,12 @@ fun SearchTab(hub: Hub) {
                 }
             }
         }
+        // Extensions communautaires installées : sites supplémentaires pour la recherche
+        if (Ext.installed.isNotEmpty()) item {
+            LazyRow(Modifier.padding(top = 10.dp), contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(Ext.installed.toList()) { e -> Choice(e.name, q.site == e.name) { hub.query = q.copy(site = e.name) } }
+            }
+        }
         if (q.site == "Wattpad") item {
             Row(Modifier.padding(start = 20.dp, top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Choice("Histoires", !q.wpLists) { hub.query = q.copy(wpLists = false) }

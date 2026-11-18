@@ -1,0 +1,10 @@
+{
+  "id": "royalroad", "name": "Royal Road", "logo": "RR", "color": "#F0A500", "version": 1,
+  "search": "https://www.royalroad.com/fictions/search?title={q}&page={page}",
+  "item": ".fiction-list-item",
+  "title": ".fiction-title a",
+  "link": ".fiction-title a@href",
+  "author": "",
+  "cover": "img@src",
+  "summary": "[id^=description]"
+}

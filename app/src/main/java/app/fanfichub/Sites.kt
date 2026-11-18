@@ -99,9 +99,10 @@ interface Site {
 }
 
 object Sites {
-    val all = listOf(Spirit, Wattpad, Ffn)
-    fun of(name: String) = all.firstOrNull { it.name == name }
-    fun find(url: String) = all.firstOrNull { it.owns(url) }
+    private val every = listOf(Spirit, Wattpad, Ffn)
+    val all get() = every.filter { Ext.on(it.name) }
+    fun of(name: String) = every.firstOrNull { it.name == name }
+    fun find(url: String) = every.firstOrNull { it.owns(url) }
 }
 
 fun sections(parts: List<Pair<String, String>>): Pair<List<String>, String> {

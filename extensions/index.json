@@ -1,0 +1,6 @@
+{
+  "extensions": [
+    { "name": "Royal Road", "url": "https://raw.githubusercontent.com/scalariapp-byte/Navigateur/claude/password-manager-app-8t7fic/extensions/royalroad.json" },
+    { "name": "Scribble Hub", "url": "https://raw.githubusercontent.com/scalariapp-byte/Navigateur/claude/password-manager-app-8t7fic/extensions/scribblehub.json" }
+  ]
+}

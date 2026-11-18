@@ -106,6 +106,7 @@ fun HubApp(hub: Hub) {
                     is Screen.Reader -> Reader(hub, s.id)
                     is Screen.Setup -> Setup(hub, s.site)
                     is Screen.Web -> WebScreen(hub, s.url, s.title)
+                    is Screen.Extensions -> ExtensionsScreen(hub)
                 }
             }
             hub.intro?.let { s -> BookIntro(s, remember(hub.works.size) { hub.works.groupingBy { it.site }.eachCount() }) { hub.intro = null; hub.enterSite(s) } }
@@ -225,13 +226,16 @@ fun ContinueCard(w: Work, onClick: () -> Unit) {
 // ---------- Sites ----------
 data class SiteUi(val name: String, val logo: String, val color: Color, val desc: String, val how: String)
 
-val SITE_UI = listOf(
+val ALL_SITE_UI = listOf(
     SiteUi("AO3", "AO3", Color(0xFFE5484D), "Favoris, à lire plus tard et abonnements", "Connecte-toi avec ton identifiant AO3 : le pseudo est détecté tout seul."),
     SiteUi("Wattpad", "W", Color(0xFFFF7A1A), "Bibliothèque et listes de lecture", "Cherche ton compte et choisis-le : tes listes de lecture publiques seront récupérées, sans connexion."),
     SiteUi("FanFiction.net", "FF", Color(0xFF3E7BFA), "Histoires favorites de ton profil", "Cherche ton nom d'auteur ou colle le lien de ton profil : tes histoires favorites seront récupérées."),
     SiteUi("Spirit Fanfics", "S", Color(0xFF22C3A6), "Ta bibliothèque Spirit", "Connecte-toi sur Spirit, puis indique ton pseudo."),
 )
-fun siteUi(name: String?) = SITE_UI.firstOrNull { it.name == name } ?: SITE_UI[0]
+/** Sites dont l'extension est activée. */
+val SITE_UI get() = ALL_SITE_UI.filter { Ext.on(it.name) }
+fun siteUi(name: String?) = ALL_SITE_UI.firstOrNull { it.name == name }
+    ?: Ext.byName(name ?: "")?.let { SiteUi(it.name, it.logo, Color(it.color), "Extension", "") } ?: ALL_SITE_UI[0]
 
 @Composable
 fun SiteLogo(site: String, size: Int, modifier: Modifier = Modifier) {
@@ -581,6 +585,9 @@ fun Accounts(hub: Hub) {
             Line()
             SettingRow({ RoundIcon(Icons.Default.Star) }, "Animation du livre", trail = { Switch(hub.bookAnim) }) { hub.toggleBookAnim(!hub.bookAnim) }
         }
+        Group("Extensions") {
+            SettingRow({ RoundIcon(Icons.Default.Add) }, "Extensions", "${Ext.enabled.size} sites · ${Ext.installed.size} de la communauté") { hub.push(Screen.Extensions) }
+        }
         Group("Application") {
             SettingRow({ RoundIcon(Icons.Default.Info) }, "Version ${hub.version}",
                 if (hub.newVersion != null) "Version ${hub.newVersion} disponible" else "Touche pour vérifier",
@@ -829,4 +836,48 @@ fun ReadingSettings(hub: Hub) {
                 Text("A+", color = Txt, fontSize = 21.sp, modifier = Modifier.clip(CircleShape).clickable { hub.setReader(s = hub.size + 1) }.padding(12.dp))
             }
             }
+}
+
+
+/** Extensions : sites intégrés activables + catalogue communautaire (dépôts GitHub). */
+@Composable
+fun ExtensionsScreen(hub: Hub) {
+    val scope = rememberCoroutineScope()
+    var repo by remember { mutableStateOf("") }
+    var msg by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) { msg = Ext.refresh() }
+    LazyColumn(Modifier.fillMaxSize().background(Bg), contentPadding = PaddingValues(bottom = 60.dp)) {
+        item {
+            Row(Modifier.statusBarsPadding().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                CircleIcon(Icons.AutoMirrored.Filled.ArrowBack) { hub.pop() }
+                Text("Extensions", color = Txt, fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 12.dp))
+            }
+        }
+        item { Text("SITES INTÉGRÉS", color = Mut, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, modifier = Modifier.padding(start = 22.dp, top = 8.dp, bottom = 6.dp)) }
+        items(ALL_SITE_UI) { s ->
+            SettingRow({ SiteLogo(s.name, 40) }, s.name, s.desc, trail = { Switch(Ext.on(s.name)) }) { Ext.toggle(s.name) }
+        }
+        item { Text("COMMUNAUTÉ", color = Mut, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, modifier = Modifier.padding(start = 22.dp, top = 22.dp, bottom = 6.dp)) }
+        items(Ext.installed.toList(), key = { "i" + it.id }) { e ->
+            SettingRow({ Box(Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)).background(Color(e.color)), contentAlignment = Alignment.Center) {
+                Text(e.logo, color = Color.White, fontWeight = FontWeight.Black, fontSize = 13.sp) } }, e.name, "Installée · v${e.version} · touche pour retirer") { Ext.uninstall(e.id) }
+        }
+        items(Ext.catalog.filter { c -> Ext.installed.none { it.name == c.first } }, key = { "c" + it.second }) { (name, url) ->
+            SettingRow({ RoundIcon(Icons.Default.Add) }, name, "Disponible · touche pour installer") { scope.launch { msg = Ext.install(url) } }
+        }
+        if (Ext.installed.isEmpty() && Ext.catalog.isEmpty()) item { Empty("Aucune extension dans les dépôts.") }
+        item { Text("DÉPÔTS GITHUB", color = Mut, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp, modifier = Modifier.padding(start = 22.dp, top = 22.dp, bottom = 6.dp)) }
+        items(Ext.repos.toList()) { r ->
+            Text(r.removePrefix("https://raw.githubusercontent.com/"), color = Sub, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth().clickable { if (r != Ext.DEFAULT_REPO) Ext.removeRepo(r) }.padding(horizontal = 22.dp, vertical = 8.dp))
+        }
+        item {
+            Column(Modifier.padding(horizontal = 20.dp, vertical = 10.dp)) {
+                SearchBox(repo, "Lien de l'index.json d'un dépôt") { repo = it }
+                Spacer(Modifier.height(10.dp))
+                GhostButton("Ajouter le dépôt") { Ext.addRepo(repo); repo = ""; scope.launch { msg = Ext.refresh() } }
+                msg?.let { Text(it, color = Color(0xFFF87171), fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp)) }
+            }
+        }
+    }
 }
