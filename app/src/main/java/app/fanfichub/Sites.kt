@@ -621,8 +621,8 @@ object Spirit : Site {
      * est dans un autre attribut (data-original, data-src, srcset…). On prend la première vraie image.
      */
     private fun realImg(box: org.jsoup.nodes.Element): String {
-        val bad = Regex("/common/|\\.gif($|\\?)|avatar|perfil", RegexOption.IGNORE_CASE)
-        val imgExt = Regex("\\.(jpe?g|png|webp)", RegexOption.IGNORE_CASE)
+        val bad = Regex("/common/|default\\.|avatar|perfil", RegexOption.IGNORE_CASE)
+        val imgExt = Regex("\\.(jpe?g|png|webp|gif)|/historias/", RegexOption.IGNORE_CASE)
         for (img in box.select("img, source")) for (at in img.attributes()) {
             val v = at.value.trim().split(Regex("[\\s,]+")).firstOrNull { imgExt.containsMatchIn(it) } ?: continue
             val abs = if (v.startsWith("//")) "https:$v" else if (v.startsWith("/")) "https://www.spiritfanfiction.com$v" else v
@@ -756,7 +756,9 @@ object Spirit : Site {
         lists.entries.take(40).forEach { (href, name) ->
             var url: String? = href; var n = 0
             while (url != null && n++ < 10) {
-                val d = runCatching { Web.html(url!!) }.getOrNull() ?: run { Diag.log("[$name] page illisible : $url"); null } ?: break
+                var d: Document? = null
+                for (attempt in 0..2) { d = runCatching { Web.html(url!!) }.getOrNull(); if (d != null) break; kotlinx.coroutines.delay(1500L * (attempt + 1)) }
+                if (d == null) { Diag.log("[$name] page illisible après 3 essais : $url"); break }
                 val c = cards(d, "x")
                 Diag.log("[$name] page $n : $url · titre « ${d.title().take(60)} » · fiches ${c.size} · liens histoire ${d.select("a[href*=/historia/]").size}")
                 c.take(3).forEach { Diag.log("     - ${it.title.take(50)} | ${it.author} | img=${it.cover.take(90)}") }
