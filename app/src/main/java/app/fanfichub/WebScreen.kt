@@ -51,6 +51,11 @@ private const val READ_JS = """(function(){var s=document.getElementById('fhread
 '#chapters p,.userstuff p,#storytext p,#storytext,#storycontent p,.texto p,#texto p,#conteudoTexto p,.part-content p,pre p{font-family:Georgia,"Noto Serif",serif!important;font-size:SIZEpx!important;line-height:1.8!important;color:FGC!important;margin:0 0 1.05em!important;text-align:left!important}'+
 'h1,h2,h3,.title{color:FGC!important;line-height:1.3!important}a{color:#b9a7ff!important}img{max-width:100%!important;height:auto!important}'+
 'body{padding-bottom:40px!important;-webkit-text-size-adjust:100%!important}'+
+// Tous sites : fonds unifiés, tout paragraphe de récit au même style (Wattpad data-p-id, FF.net #storycontent, Spirit .texto…)
+'div,section,article,main,pre,td,center{background-color:transparent!important;color:FGC!important;border-color:rgba(128,128,128,.25)!important}'+
+'p,[data-p-id],#storycontent,#storycontent p,[class*=texto] p,[class*=capitulo] p,.panel-reading p,pre{font-family:Georgia,"Noto Serif",serif!important;font-size:SIZEpx!important;line-height:1.8!important;color:FGC!important;white-space:normal!important}'+
+'#storycontent,.panel-reading,[class*=texto],[class*=part-content]{max-width:720px!important;margin:0 auto!important;padding:0 18px!important}'+
+'[id*=banner],[class*=app-banner],[class*=AppBanner],[class*=download-app],[class*=sticky-header],.t_head,#top_menu{display:none!important}'+
 'blockquote{margin:0 0 1em!important;padding:0 0 0 10px!important}.preface,.notes,.summary{padding:0 14px!important}'+
 '.fhfold{display:none!important}.fhmore{color:#b9a7ff;font-size:14px;font-weight:bold;padding:6px 0 12px;cursor:pointer}';
 if(!s.parentNode)document.head.appendChild(s);
@@ -61,7 +66,7 @@ document.querySelectorAll('.preface .summary blockquote,.preface .notes blockquo
 })()"""
 
 private const val CLEAN_JS = """(function(){
-var P=['Rejoins la plus grande','Join the largest','Cela pourrait aussi te plaire','You may also like','Télécharger l','Download the','Essayer Premium','Try Premium','Signaler cette histoire','Report this story','Directives du Contenu','Content Guidelines','Partenariats avec','Ouvrir dans l','Open in app','Inscris-toi','Sign up','Cadastre-se','Baixe o app'];
+var P=['Rejoins la plus grande','Join the largest','Cela pourrait aussi te plaire','You may also like','Télécharger l','Download the','Essayer Premium','Try Premium','Signaler cette histoire','Report this story','Directives du Contenu','Content Guidelines','Partenariats avec','Ouvrir dans l','Open in app','Inscris-toi','Sign up','Cadastre-se','Baixe o app','Baixar','Gratuito - em Google Play','Just In Community','Advertisement','Publicité'];
 function hide(e){if(e&&e.style)e.style.setProperty('display','none','important')}
 function clean(){
  document.querySelectorAll('footer,[role=contentinfo],[id*=cookie],[class*=cookie],[class*=Cookie],[id*=onetrust],ins,iframe').forEach(hide);
