@@ -383,7 +383,41 @@ class Hub(ctx: Context) {
                 url = next
             }
         }
-        try {
+        try { coroutineScope {
+          // Wattpad, FF.net et Spirit en parallèle d'AO3 (et entre eux) : un site lent ne bloque plus les autres
+          val others = async {
+            // 5. Autres sites : bibliothèque du compte puis fanfictions suivies non terminées.
+            Sites.all.filter { only == null || it.name == only }.map { s -> async {
+                val su = users[s.name]
+                if (su != null) siteStatus[s.name] = "Synchro en cours…"
+                if (su != null) runCatching {
+                    syncInfo = "${s.name} · bibliothèque…"; syncProgress = null
+                    val l = s.library(su, old); l.forEach { add(it); libIds += it.id }; publish()
+                    siteStatus[s.name] = "${l.size} fanfictions synchronisées"
+                }.onFailure { e -> siteStatus[s.name] = if (old.values.any { it.site == s.name }) "Synchro partielle : ${e.message}" else "Erreur : ${e.message}" }
+                // Détails : fiches encore incomplètes (« ?/? ») et fanfictions suivies non terminées.
+                fun noSummary(w: Work) = w.summary.isBlank() && old[w.id]?.summary.isNullOrBlank() && !(quick && (old[w.id]?.let { now - it.checked < 3 * 3_600_000L } == true))
+                fun slugTitle(w: Work) = badTitle(w.title)
+                // La page mobile FF.net n'a pas de résumé (il vient de la liste des favoris) : inutile d'y aller pour ça.
+                val wantSummary = s.name != "FanFiction.net"
+                val targets = (seen.values.filter { it.site == s.name && (it.chapters.startsWith("?") || (wantSummary && noSummary(it)) || slugTitle(old[it.id] ?: it)) } +
+                    old.values.filter { it.site == s.name && it.id !in seen && (full || !it.complete) && !fresh(it) }).distinctBy { it.id }.take(80)
+                targets.forEachIndexed { i, w ->
+                    syncInfo = "${s.name} · détails ${i + 1}/${targets.size}"; syncProgress = (i + 1f) / targets.size
+                    // Détails : complètent la fiche (résumé, chapitres…) sans écraser ce que la bibliothèque a déjà de bon
+                    runCatching { s.info(w.link) }.getOrNull()?.let { inf ->
+                        val p = seen[w.id]
+                        seen[w.id] = if (p == null) inf.copy(sources = w.sources, checked = now) else inf.copy(sources = p.sources, checked = now,
+                            title = if (slugTitle(p)) inf.title else p.title, author = p.author.ifBlank { inf.author },
+                            summary = inf.summary.ifBlank { p.summary }, cover = p.cover.takeIf { goodCover(it) } ?: inf.cover,
+                            fandoms = if (p.fandoms.isEmpty() || p.fandoms == listOf(s.name)) inf.fandoms else p.fandoms,
+                            words = if (inf.words > 0) inf.words else p.words)
+                    }
+                    if (i % 4 == 3) publish()
+                }
+                publish()
+            } }.awaitAll()
+          }
           if (u != null) {
             // 1. Favoris triés par date de mise à jour de l'œuvre : tout ce qui suit une œuvre inchangée est inchangé.
             pages("/users/$u/bookmarks?bookmark_search%5Bsort_column%5D=bookmarkable_date", "Favori", 40) { l -> l.any { unchanged(it) } }
@@ -422,40 +456,12 @@ class Hub(ctx: Context) {
             publish()
             siteStatus["AO3"] = "${seen.values.count { it.site == "AO3" }} fanfictions synchronisées"
           }
-            // 5. Autres sites : bibliothèque du compte puis fanfictions suivies non terminées.
-            for (s in Sites.all.filter { only == null || it.name == only }) {
-                val su = users[s.name]
-                if (su != null) runCatching {
-                    siteStatus.remove(s.name)
-                    syncInfo = "${s.name} · bibliothèque…"; syncProgress = null
-                    val l = s.library(su, old); l.forEach { add(it); libIds += it.id }; publish()
-                    siteStatus[s.name] = "${l.size} fanfictions synchronisées"
-                }.onFailure { e -> siteStatus[s.name] = if (old.values.any { it.site == s.name }) "Synchro partielle : ${e.message}" else "Erreur : ${e.message}" }
-                // Détails : fiches encore incomplètes (« ?/? ») et fanfictions suivies non terminées.
-                fun noSummary(w: Work) = w.summary.isBlank() && old[w.id]?.summary.isNullOrBlank() && !(quick && (old[w.id]?.let { now - it.checked < 3 * 3_600_000L } == true))
-                fun slugTitle(w: Work) = badTitle(w.title)
-                val targets = (seen.values.filter { it.site == s.name && (it.chapters.startsWith("?") || noSummary(it) || slugTitle(old[it.id] ?: it)) } +
-                    old.values.filter { it.site == s.name && it.id !in seen && (full || !it.complete) && !fresh(it) }).distinctBy { it.id }
-                targets.forEachIndexed { i, w ->
-                    syncInfo = "${s.name} · détails ${i + 1}/${targets.size}"; syncProgress = (i + 1f) / targets.size
-                    // Détails : complètent la fiche (résumé, chapitres…) sans écraser ce que la bibliothèque a déjà de bon
-                    runCatching { s.info(w.link) }.getOrNull()?.let { inf ->
-                        val p = seen[w.id]
-                        seen[w.id] = if (p == null) inf.copy(sources = w.sources, checked = now) else inf.copy(sources = p.sources, checked = now,
-                            title = if (slugTitle(p)) inf.title else p.title, author = p.author.ifBlank { inf.author },
-                            summary = inf.summary.ifBlank { p.summary }, cover = p.cover.takeIf { goodCover(it) } ?: inf.cover,
-                            fandoms = if (p.fandoms.isEmpty() || p.fandoms == listOf(s.name)) inf.fandoms else p.fandoms,
-                            words = if (inf.words > 0) inf.words else p.words)
-                    }
-                    if (i % 4 == 3) publish()
-                }
-                publish()
-            }
+            others.await()
             if (only == null) prefs.edit().putLong("lastSync", System.currentTimeMillis()).apply()
             val mine = works.filter { only == null || it.site == only }
             val nw = mine.count { it.newChapters > 0 }
             syncInfo = (only?.let { "$it · " } ?: "") + "${mine.size} fanfictions · " + if (nw == 0) "tout est à jour" else "$nw avec de nouveaux chapitres"
-        } catch (e: Exception) {
+        } } catch (e: Exception) {
             publish()
             syncInfo = "Synchro interrompue : ${e.message ?: "réseau indisponible"}"
         } finally { syncing = false; syncProgress = null; prefetchCovers() }
