@@ -658,8 +658,11 @@ object Spirit : Site {
             val n = Regex("Cap[ií]tulos\\s+(\\d+)", ic).find(t)?.groupValues?.get(1)?.toIntOrNull() ?: 1
             val done = Regex("Conclu[ií]d[ao]", ic).containsMatchIn(t)
             val cat = Regex("Categorias\\s+(.+?)(?:\\s+G[êe]neros|\\s+Personagens|$)", ic).find(t)?.groupValues?.get(1)?.trim()?.take(80) ?: name
-            val summary = box.select("p, div").filter { it.children().isEmpty() || it.tagName() == "p" }.map { it.text() }
-                .filter { it.length > 60 && !it.contains("escrita por", true) && !it.startsWith("Categorias") && !it.startsWith("Gêneros") }.maxByOrNull { it.length } ?: ""
+            // Résumé : bloc dédié (sinopse/resumo) sinon plus long texte sans métadonnées
+            val meta = Regex("escrita por|Categorias|G[êe]neros|Palavras|Atualizada|Cap[ií]tulos|Idioma|Ver sinopse", ic)
+            val summary = (box.select("[class*=sinopse], [class*=resumo], [class*=descricao]").map { it.text() } +
+                box.select("p, div, span").map { it.text() }.filter { !meta.containsMatchIn(it) })
+                .map { it.replace(Regex("\\s*Ver sinopse\\s*$", ic), "").trim() }.filter { it.length > 40 }.maxByOrNull { it.length } ?: ""
             val im = realImg(box)
             out["sp:$sl"] = Work("sp:$sl", title, Regex("escrita por\\s+(\\S+)", ic).find(t)?.groupValues?.get(1) ?: "", listOf(cat.substringBefore(",").trim()), "",
                 digits(Regex("Palavras\\s+([\\d.]+)", ic).find(t)?.groupValues?.get(1)), "$n/${if (done) n else "?"}",

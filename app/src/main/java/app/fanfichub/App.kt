@@ -408,7 +408,15 @@ class Hub(ctx: Context) {
                     old.values.filter { it.site == s.name && it.id !in seen && (full || !it.complete) && !fresh(it) }).distinctBy { it.id }
                 targets.forEachIndexed { i, w ->
                     syncInfo = "${s.name} · détails ${i + 1}/${targets.size}"; syncProgress = (i + 1f) / targets.size
-                    runCatching { s.info(w.link) }.getOrNull()?.let { add(it.copy(sources = seen[w.id]?.sources ?: w.sources, checked = now)) }
+                    // Détails : complètent la fiche (résumé, chapitres…) sans écraser ce que la bibliothèque a déjà de bon
+                    runCatching { s.info(w.link) }.getOrNull()?.let { inf ->
+                        val p = seen[w.id]
+                        seen[w.id] = if (p == null) inf.copy(sources = w.sources, checked = now) else inf.copy(sources = p.sources, checked = now,
+                            title = if (slugTitle(p)) inf.title else p.title, author = p.author.ifBlank { inf.author },
+                            summary = inf.summary.ifBlank { p.summary }, cover = p.cover.takeIf { goodCover(it) } ?: inf.cover,
+                            fandoms = if (p.fandoms.isEmpty() || p.fandoms == listOf(s.name)) inf.fandoms else p.fandoms,
+                            words = if (inf.words > 0) inf.words else p.words)
+                    }
                     if (i % 4 == 3) publish()
                 }
                 publish()
