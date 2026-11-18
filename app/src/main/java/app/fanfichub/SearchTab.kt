@@ -114,7 +114,7 @@ fun SearchTab(hub: Hub) {
     picking?.let { f -> Picker(f, { picking = null }) { o -> hub.query = q.copy(spirit = q.spirit + (f.name to o)); picking = null } }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 130.dp)) {
-        item { Title("RECHERCHE", "Trouver une fanfiction") }
+        item { Title("", "Recherche") }
         item {
             Row(Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp).fillMaxWidth().height(54.dp).clip(RoundedCornerShape(18.dp)).background(Surf)
                 .border(1.dp, Surf2, RoundedCornerShape(18.dp)).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -248,7 +248,7 @@ fun SearchTab(hub: Hub) {
                 Box(Modifier.padding(20.dp)) { GhostButton("Charger plus") { hub.runSearch(more = true) } }
             }
             hub.results.isEmpty() && hub.listHits.isEmpty() -> item {
-                Empty("Choisis un site et tape ta recherche. Sur AO3, des suggestions de personnages et de fandoms s'affichent pendant la frappe.")
+                Spacer(Modifier.height(1.dp))
             }
         }
     }

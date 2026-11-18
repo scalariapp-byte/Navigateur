@@ -244,7 +244,6 @@ object Wattpad : Site {
         return emptyList()
     }
 
-    private val listCache = HashMap<String, List<ListHit>>()
     private fun hit(o: JSONObject) = ListHit(o.get("id").toString(), o.optString("name"), o.optInt("numStories"),
         o.optJSONObject("user")?.optString("name") ?: "", o.optString("cover"), o.optInt("numStories"))
 
@@ -333,43 +332,6 @@ object Wattpad : Site {
         val readerNames = pool.flatMap { it.withIndex() }.sortedBy { it.index }.map { it.value }.distinctBy { it.lowercase() }.take(600)
         jobs += readerNames.map { r -> async { visit(r) } }
         jobs.awaitAll()
-    }
-
-    /**
-     * Listes de lecture correspondant à une recherche. Wattpad n'a pas de recherche de listes publique fiable :
-     * on prend les auteurs des histoires trouvées + les comptes correspondants, et on garde leurs listes dont le nom correspond.
-     */
-    suspend fun searchLists(q: String, offset: Int): List<ListHit> {
-        val first = q.lowercase().split(Regex("[^\\p{L}\\p{N}]+")).firstOrNull { it.length >= 3 } ?: q.lowercase().trim()
-        api(q, offset).filter { first in it.name.lowercase() }.takeIf { it.isNotEmpty() }?.let { return it }
-        val all = listCache.getOrPut(q.trim().lowercase()) { viaAuthors(q) }
-        return all.drop(offset).take(20)
-    }
-
-    private suspend fun viaAuthors(q: String): List<ListHit> = coroutineScope {
-        val words = q.lowercase().split(Regex("[^\\p{L}\\p{N}]+")).filter { it.length >= 3 }.ifEmpty { listOf(q.lowercase().trim()) }
-        val stories = listOf(async { runCatching { searchStories(q, 0) }.getOrDefault(emptyList()) }, async { runCatching { searchStories(q, 20) }.getOrDefault(emptyList()) }).awaitAll().flatten()
-        val users = runCatching { searchUsers(q) }.getOrDefault(emptyList()).map { it.id }
-        val authors = (users + stories.map { it.author }).filter { it.isNotBlank() }.distinctBy { it.lowercase() }.take(30)
-        val gate = Semaphore(6)
-        authors.map { u -> async { gate.withPermit { runCatching {
-            val a = JSONObject(json("$B/api/v3/users/${enc(u)}/lists?limit=100&fields=lists(id,name,numStories,cover,user(name))", "ui")).optJSONArray("lists") ?: JSONArray()
-            (0 until a.length()).map { hit(a.getJSONObject(it)) }
-        }.getOrDefault(emptyList()) } } }.awaitAll().flatten()
-            .map { h -> h to words.count { h.name.lowercase().contains(it) } }
-            .filter { it.second > 0 && it.first.count > 0 }
-            .sortedWith(compareByDescending<Pair<ListHit, Int>> { it.second }.thenByDescending { it.first.count })
-            .map { it.first }.distinctBy { it.id }
-    }
-
-    private suspend fun api(q: String, offset: Int): List<ListHit> {
-        val e = URLEncoder.encode(q.trim(), "UTF-8")
-        for (u in listOf("$B/v4/search/lists/?query=$e&limit=20&offset=$offset&fields=lists(id,name,numStories,user(name),cover)",
-                "$B/api/v3/lists?query=$e&limit=20&offset=$offset&fields=lists(id,name,numStories,user(name),cover)")) {
-            val a = runCatching { JSONObject(json(u, "ui")).optJSONArray("lists") }.getOrNull() ?: continue
-            if (a.length() > 0) return (0 until a.length()).map { hit(a.getJSONObject(it)) }
-        }
-        return emptyList()
     }
 
     suspend fun listWorks(id: String): List<Work> = listStories(id).map { work(it).copy(sources = setOf("Recherche")) }
@@ -788,7 +750,7 @@ object Spirit : Site {
         }
         // Favoris et bibliothèque
         for ((path, src) in listOf("/perfil/$u/favoritos" to "Favori", "/perfil/$u/biblioteca" to "Bibliothèque", "/biblioteca" to "Bibliothèque")) {
-            runCatching { Web.html(B + path) }.getOrNull()?.let { Diag.log("$src $path : fiches ${cards(it, "x").size} · liens ${it.select("a[href*=/historia/]").size}"); addStories(it, src) }
+            runCatching { Web.html(B + path) }.getOrNull()?.let { addStories(it, src) }
         }
         // Listes de lecture : liens « lista » du profil et de la page « Veja todas as Listas de leitura »
         val lists = LinkedHashMap<String, String>() // url -> nom
@@ -815,27 +777,16 @@ object Spirit : Site {
             doneOv += next; if (doneOv.size > 15) break
             runCatching { Web.html(next) }.getOrNull()?.let { collectLists(it) }
         }
-        Diag.log("Listes trouvées : ${lists.size}")
-        lists.forEach { (h, n) -> Diag.log("  • $n → $h") }
         lists.entries.take(40).forEach { (href, name) ->
             var url: String? = href; var n = 0
             while (url != null && n++ < 10) {
                 var d: Document? = null
                 for (attempt in 0..2) { d = runCatching { Web.html(url!!) }.getOrNull(); if (d != null) break; kotlinx.coroutines.delay(1500L * (attempt + 1)) }
-                if (d == null) { Diag.log("[$name] page illisible après 3 essais : $url"); break }
-                val c = cards(d, "x")
-                Diag.log("[$name] page $n : $url · titre « ${d.title().take(60)} » · fiches ${c.size} · liens histoire ${d.select("a[href*=/historia/]").size}")
-                c.take(3).forEach { Diag.log("     - ${it.title.take(50)} | ${it.author} | img=${it.cover.take(90)} | résumé=${it.summary.take(80)}") }
-                if (n == 1 && name == lists.values.first()) {
-                    val a = d.selectFirst("a[href*=/historia/]")
-                    val box = generateSequence(a?.parent()) { it.parent() }.take(8).firstOrNull { it.text().contains("escrita por", true) }
-                    Diag.log("     HTML 1re fiche : " + (box?.outerHtml() ?: a?.parent()?.outerHtml() ?: "aucune").replace(Regex("\\s+"), " ").take(1500))
-                }
+                if (d == null) break
                 addStories(d, "Liste : $name")
                 val next = d.select("a[rel=next], a").firstOrNull { it.attr("rel") == "next" || Regex("^pr[óo]xim", ic).containsMatchIn(it.text()) }?.absUrl("href")
                 // Page suivante de la MÊME liste uniquement (pas « liste suivante »)
                 url = next?.takeIf { it.isNotBlank() && it != url && it.substringBefore('?').trimEnd('/') == href.substringBefore('?').trimEnd('/') }
-                if (next != null) Diag.log("     suivant proposé : $next → ${if (url != null) "suivi" else "ignoré"}")
             }
         }
         if (titles.isEmpty()) error("aucune histoire trouvée (favoris, bibliothèque et listes vides ou privés ; connecte-toi à l'étape 1)")

@@ -339,9 +339,8 @@ fun BottomBar(hub: Hub, modifier: Modifier) {
 
 @Composable
 fun Title(small: String, big: String) {
-    Column(Modifier.statusBarsPadding().padding(start = 22.dp, end = 22.dp, top = 26.dp)) {
-        Text(small, style = TextStyle(brush = Grad, fontSize = 13.sp, fontWeight = FontWeight.Black, letterSpacing = 3.sp))
-        Text(big, color = Txt, fontSize = 34.sp, fontWeight = FontWeight.Bold, lineHeight = 40.sp, modifier = Modifier.padding(top = 6.dp))
+    Column(Modifier.statusBarsPadding().padding(start = 22.dp, end = 22.dp, top = 14.dp)) {
+        Text(big, color = Txt, fontSize = 30.sp, fontWeight = FontWeight.Bold, lineHeight = 36.sp)
     }
 }
 
@@ -386,7 +385,7 @@ fun Feed(hub: Hub) {
         if (hub.newVersion != null) item { UpdateCard(hub) }
         if (hub.user == null && hub.users.isEmpty()) item {
             Row(Modifier.padding(20.dp).fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Surf).clickable { hub.tab = 3 }.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Configure tes comptes pour remplir tes étagères", color = Txt, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                Text("Configure tes comptes", color = Txt, fontSize = 15.sp, modifier = Modifier.weight(1f))
                 Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Mut)
             }
         }
@@ -399,7 +398,7 @@ fun Feed(hub: Hub) {
             }
         }
         item { Section(if (fresh.isEmpty()) "Nouveaux chapitres" else "Nouveaux chapitres · ${fresh.size}") }
-        if (fresh.isEmpty()) item { Empty(if (hub.works.isEmpty()) "Touche un volume de l'étagère pour commencer." else "Tout est à jour ✓") }
+        if (fresh.isEmpty()) item { Empty(if (hub.works.isEmpty()) "Touche un volume." else "À jour ✓") }
         items(fresh, key = { it.id }) { w ->
             WorkCard(w, Modifier.padding(horizontal = 20.dp, vertical = 6.dp).animateItem()) { hub.push(Screen.Detail(w.id)) }
         }
@@ -486,7 +485,7 @@ fun Library(hub: Hub) {
         }
         if (!listMode) {
             item { Spacer(Modifier.height(16.dp)) }
-            if (shelves.isEmpty()) item { Empty("Tes étagères sont vides. Configure un compte ou ajoute une fanfiction par lien (+).") }
+            if (shelves.isEmpty()) item { Empty("Vide. Configure un compte ou +.") }
             items(shelves, key = { it.first }) { (k, v) ->
                 BookShelf(if (site == "ALL") k else collectionName(k), v, onAll = { col = k }) { w -> hub.push(Screen.Detail(w.id)) }
             }
@@ -565,9 +564,9 @@ fun Accounts(hub: Hub) {
                     } } }
             }
             Line()
-            SettingRow({ RoundIcon(Icons.Default.Refresh) }, "Tout synchroniser", "Rapide : récupère les nouveautés") { hub.startSync() }
+            SettingRow({ RoundIcon(Icons.Default.Refresh) }, "Tout synchroniser") { hub.startSync() }
             Line()
-            SettingRow({ RoundIcon(Icons.Default.Refresh, A2) }, "Synchronisation complète", "Relit tout et retire ce que tu as enlevé") { hub.startSync(full = true) }
+            SettingRow({ RoundIcon(Icons.Default.Refresh, A2) }, "Synchronisation complète") { hub.startSync(full = true) }
         }
         Group("Apparence") {
             Row(Modifier.padding(14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -582,7 +581,7 @@ fun Accounts(hub: Hub) {
                     }
             }
             Line()
-            SettingRow({ RoundIcon(Icons.Default.Star) }, "Animation du livre", "Le volume tombe et s'ouvre", trail = { Switch(hub.bookAnim) }) { hub.toggleBookAnim(!hub.bookAnim) }
+            SettingRow({ RoundIcon(Icons.Default.Star) }, "Animation du livre", trail = { Switch(hub.bookAnim) }) { hub.toggleBookAnim(!hub.bookAnim) }
         }
         Group("Lecture") {
             Row(Modifier.padding(14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -596,7 +595,7 @@ fun Accounts(hub: Hub) {
                 }
             }
             Line()
-            SettingRow({ RoundIcon(Icons.Default.Info, A2) }, "Traduction automatique", "Résumés et chapitres en français", trail = { Switch(hub.autoTr) }) { hub.toggleAutoTr(!hub.autoTr) }
+            SettingRow({ RoundIcon(Icons.Default.Info, A2) }, "Traduction automatique", trail = { Switch(hub.autoTr) }) { hub.toggleAutoTr(!hub.autoTr) }
             Line()
             Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Taille du texte", color = Txt, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
@@ -612,7 +611,7 @@ fun Accounts(hub: Hub) {
                 if (hub.newVersion != null) hub.startUpdate() else hub.startCheck(manual = true)
             }
             SettingRow({ RoundIcon(Icons.Default.Info) }, "Diagnostic",
-                if (hub.diagRunning) "Analyse en cours… (≈20 s)" else "Teste résumés, couvertures et listes, puis copie le rapport") { hub.runDiag() }
+                if (hub.diagRunning) "En cours…" else null) { hub.runDiag() }
         }
     }
 }

@@ -200,15 +200,6 @@ private val WEB_ERR = Regex("page web non disponible|webpage not available|page 
 fun webError(t: String) = WEB_ERR.containsMatchIn(t)
 fun badTitle(t: String) = t.isBlank() || Regex("^[a-z0-9-]+-\\d+$").matches(t) || webError(t)
 
-/** Journal de diagnostic (activé seulement pendant un diagnostic). */
-object Diag {
-    private val sb = StringBuilder()
-    @Volatile var on = false
-    fun reset() = synchronized(sb) { sb.setLength(0) }
-    fun log(s: String) { if (on) synchronized(sb) { sb.appendLine(s) } }
-    fun text() = synchronized(sb) { sb.toString() }
-}
-
 data class ListHit(val id: String, val name: String, val count: Int, val user: String, val cover: String, val total: Int = 0, val score: Int = 0, val detail: String = "")
 
 /** Champ du formulaire de recherche d'un site (nom, libellé, options valeur → texte). */

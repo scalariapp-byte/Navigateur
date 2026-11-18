@@ -133,7 +133,6 @@ private fun ShelfScene(counts: Map<String, Int>, auto: String?, header: Boolean,
         if (header) Column(Modifier.statusBarsPadding().padding(start = 22.dp, top = 22.dp)) {
             Text("FANFIC HUB", style = TextStyle(brush = Grad, fontSize = 13.sp, fontWeight = FontWeight.Black, letterSpacing = 3.sp))
             Text("Choisis un manga", color = Txt, fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(top = 4.dp))
-            Text("Chaque volume est un site. Touche-le pour l'ouvrir.", color = Mut, fontSize = 14.sp, modifier = Modifier.padding(top = 2.dp))
         }
         // Lueur au sol
         val glowColor = siteUi(falling).color
