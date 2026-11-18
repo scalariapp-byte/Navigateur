@@ -139,6 +139,24 @@ fun WoodPlank() {
     }
 }
 
+private val MONTHS = listOf("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")
+/** Date de mise à jour comparable (aaaammjj) à partir des formats des sites ; 0 si inconnue. */
+fun dateKey(w: Work): Int {
+    val u = w.updated.lowercase()
+    Regex("(\\d{4})-(\\d{2})-(\\d{2})").find(u)?.let { val (y, m, d) = it.destructured; return y.toInt() * 10000 + m.toInt() * 100 + d.toInt() }
+    Regex("(\\d{1,2})/(\\d{1,2})/(\\d{4})").find(u)?.let { val (d, m, y) = it.destructured; return y.toInt() * 10000 + m.toInt() * 100 + d.toInt() }
+    Regex("([a-z]{3})[a-z]* (\\d{1,2})(?:, (\\d{4}))?").find(u)?.let { val (mo, d, y) = it.destructured
+        val m = MONTHS.indexOf(mo) + 1; if (m > 0) return (y.toIntOrNull() ?: java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)) * 10000 + m * 100 + d.toInt() }
+    return 0
+}
+/** Crossover : plusieurs fandoms, ou « x » / « crossover » dans le titre ou les tags. */
+fun isCrossover(w: Work) = fandomKey(w).startsWith("Crossover") || Regex("(?i)crossover|\\bx\\b|×").containsMatchIn(w.title + " " + w.tags.joinToString(" "))
+fun sortWorks(l: List<Work>, mode: Int): List<Work> = when (mode) {
+    0 -> l.sortedBy { it.title.lowercase() }
+    2 -> l.sortedWith(compareByDescending<Work> { isCrossover(it) }.thenBy { it.title.lowercase() })
+    else -> l.sortedWith(compareByDescending<Work> { dateKey(it) }.thenByDescending { it.checked })
+}
+
 /** Coche de sélection posée sur un livre ou une fiche. */
 @Composable
 fun SelMark(modifier: Modifier = Modifier) {

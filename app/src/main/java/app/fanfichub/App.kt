@@ -252,6 +252,10 @@ class Hub(ctx: Context) {
 
     private val detailing = HashSet<String>()
 
+    /** Tri des listes : 0 = A–Z, 1 = récent, 2 = crossovers d'abord. */
+    var sortMode by mutableIntStateOf(prefs.getInt("sortMode", 1)); private set
+    fun setSort(m: Int) { sortMode = m; prefs.edit().putInt("sortMode", m).apply() }
+
     // ---- Suppression (masquage) avec annuler / rétablir / tout restaurer
     val hidden = mutableStateListOf<String>().apply { addAll(prefs.getStringSet("hidden", emptySet()) ?: emptySet()) }
     private val undoStack = ArrayDeque<Pair<Boolean, Set<String>>>() // (masqué ?, fiches)

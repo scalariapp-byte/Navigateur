@@ -444,7 +444,7 @@ fun Library(hub: Hub) {
         else if (site == "AO3" || site == "FanFiction.net") visible.groupBy { fandomKey(it) }.map { (k, v) -> k to v }.sortedByDescending { it.second.size }
         else visible.flatMap { w -> w.sources.map { it to w } }.groupBy({ it.first }, { it.second }).map { (k, v) -> k to v }.sortedByDescending { it.second.size }
     }
-    val list = remember(visible, q, f, col, hub.downloaded) {
+    val list = remember(visible, q, f, col, hub.downloaded, hub.sortMode) {
         visible.filter { w ->
             col.let { c -> c == null || c in w.sources || c == w.site || ((w.site == "AO3" || w.site == "FanFiction.net") && c == fandomKey(w)) } &&
             (q.isBlank() || listOf(w.title, w.author, w.fandoms.joinToString(), w.tags.joinToString()).any { it.contains(q, true) }) && when (f) {
@@ -454,7 +454,7 @@ fun Library(hub: Hub) {
                 4 -> hub.hasText(w.id)
                 else -> true
             }
-        }.sortedWith(compareByDescending<Work> { it.newChapters > 0 }.thenByDescending { it.lastRead }.thenBy { it.title.lowercase() })
+        }.let { sortWorks(it, hub.sortMode) }
     }
     val listMode = searching || col != null || f != 0
     val gridMode = col != null && !searching && f == 0
@@ -491,6 +491,12 @@ fun Library(hub: Hub) {
             }
         }
         item { SiteChips(hub) }
+        // Tri des listes de lecture (tous les sites)
+        item {
+            Row(Modifier.padding(start = 20.dp, top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("A–Z", "Récent", "Crossovers d'abord").forEachIndexed { i, t -> FilterPill(t, hub.sortMode == i) { hub.setSort(i) } }
+            }
+        }
         if (adding) item {
             Column(Modifier.padding(top = 12.dp)) {
                 SearchBox(link, "Colle le lien d'une fanfiction") { link = it }
@@ -514,7 +520,7 @@ fun Library(hub: Hub) {
             item { Spacer(Modifier.height(16.dp)) }
             if (shelves.isEmpty()) item { Empty("Vide. Configure un compte.") }
             items(shelves, key = { it.first }) { (k, v) ->
-                BookShelf(if (site == "ALL") k else collectionName(k), v, onAll = { col = k }, isSel = { it.id in sel }) { w -> open(w) }
+                BookShelf(if (site == "ALL") k else collectionName(k), sortWorks(v, hub.sortMode), onAll = { col = k }, isSel = { it.id in sel }) { w -> open(w) }
             }
         } else if (gridMode) {
             item { Spacer(Modifier.height(8.dp)) }
