@@ -491,6 +491,13 @@ object Ffn : Site {
             done, setOf("Favori"), site = name, url = "$B/s/$id", cover = cover, checked = System.currentTimeMillis())
     }
     private fun img(e: org.jsoup.nodes.Element?): String = e?.let { it.absUrl("data-original").ifBlank { it.absUrl("src") } }?.replace("/75/", "/180/")?.takeIf { it.startsWith("http") && Regex("/image/\\d+/").containsMatchIn(it) } ?: ""
+    /** Résumé d'une entrée de liste : le texte du bloc moins le titre, « by Auteur » et la ligne de stats. */
+    private fun ffnSummary(box: org.jsoup.nodes.Element, title: String, meta: String): String {
+        box.selectFirst(".z-indent, .z-padtop")?.ownText()?.trim()?.takeIf { it.length > 20 }?.let { return it }
+        var t = box.text().replace(meta, " ").replace(title, " ")
+        box.select("a[href^=/u/]").forEach { t = t.replace("by " + it.text(), " ").replace(it.text(), " ") }
+        return t.replace(Regex("\\s+"), " ").trim().trimStart('»', '-', '·', ' ').takeIf { it.length > 20 } ?: ""
+    }
     private fun metaDesc(d: Document) = (d.selectFirst("meta[name=description]")?.attr("content") ?: d.selectFirst("meta[property=og:description]")?.attr("content") ?: "").trim()
 
     override suspend fun info(url: String): Work? {
@@ -531,7 +538,7 @@ object Ffn : Site {
             val meta = box.selectFirst(".gray, .xgray, .z-padtop2")?.text() ?: box.text()
             val fandom = meta.substringBefore(",").takeIf { it.length in 2..60 && !it.contains(":") } ?: ""
             out[id] = work(id, a.text(), box.selectFirst("a[href^=/u/]")?.text() ?: "", fandom, meta,
-                box.selectFirst(".z-indent, .z-padtop")?.ownText() ?: "", img(box.selectFirst("img"))).copy(sources = setOf("Recherche"))
+                ffnSummary(box, a.text(), meta), img(box.selectFirst("img"))).copy(sources = setOf("Recherche"))
         }
         return out.values.toList()
     }
@@ -550,7 +557,7 @@ object Ffn : Site {
                 val meta = box.selectFirst(".gray, .xgray, .z-padtop2")?.text() ?: box.text()
                 val fandom = meta.substringBefore(",").takeIf { it.length in 2..60 && !it.contains(":") } ?: ""
                 out[id] = work(id, a.text(), box.selectFirst("a[href^=/u/]")?.text() ?: "", fandom, meta,
-                    box.selectFirst(".z-indent, .z-padtop")?.ownText() ?: "", img(box.selectFirst("img")))
+                    ffnSummary(box, a.text(), meta), img(box.selectFirst("img")))
                 added++
             }
             if (added == 0) break
@@ -764,7 +771,7 @@ object Spirit : Site {
                 if (d == null) { Diag.log("[$name] page illisible après 3 essais : $url"); break }
                 val c = cards(d, "x")
                 Diag.log("[$name] page $n : $url · titre « ${d.title().take(60)} » · fiches ${c.size} · liens histoire ${d.select("a[href*=/historia/]").size}")
-                c.take(3).forEach { Diag.log("     - ${it.title.take(50)} | ${it.author} | img=${it.cover.take(90)}") }
+                c.take(3).forEach { Diag.log("     - ${it.title.take(50)} | ${it.author} | img=${it.cover.take(90)} | résumé=${it.summary.take(80)}") }
                 if (n == 1 && name == lists.values.first()) {
                     val a = d.selectFirst("a[href*=/historia/]")
                     val box = generateSequence(a?.parent()) { it.parent() }.take(8).firstOrNull { it.text().contains("escrita por", true) }

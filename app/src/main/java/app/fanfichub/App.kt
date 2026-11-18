@@ -210,6 +210,21 @@ class Hub(ctx: Context) {
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     } }
 
+    private val detailing = HashSet<String>()
+    /** À l'ouverture d'une fiche sans résumé : va chercher la page de l'histoire et complète (résumé, mots, chapitres). */
+    fun ensureDetails(w: Work) {
+        if (w.summary.isNotBlank() || !detailing.add(w.id)) return
+        val site = Sites.all.firstOrNull { it.name == w.site } ?: return
+        scope.launch {
+            runCatching { withContext(Dispatchers.IO) { site.info(w.link) } }.getOrNull()?.let { inf ->
+                val cur = work(w.id) ?: w
+                val upd = cur.copy(summary = inf.summary.ifBlank { cur.summary }, words = if (inf.words > 0) inf.words else cur.words,
+                    author = cur.author.ifBlank { inf.author }, cover = cur.cover.takeIf { goodCover(it) } ?: inf.cover)
+                if (works.any { it.id == w.id }) update(upd) else { val i = results.indexOfFirst { it.id == w.id }; if (i >= 0) results[i] = upd }
+            }
+        }
+    }
+
     fun addToLibrary(w: Work) { update(w.copy(sources = setOf("Ajouté"))) }
 
     val listHits = mutableStateListOf<ListHit>()

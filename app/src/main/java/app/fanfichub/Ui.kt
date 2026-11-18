@@ -757,6 +757,7 @@ fun Login(hub: Hub, site: String) {
 @Composable
 fun Detail(hub: Hub, id: String) {
     val w = hub.work(id) ?: return
+    LaunchedEffect(id) { hub.ensureDetails(w) }
     val c = fandomColor(w.fandom)
     val sc = siteUi(w.site).color
     val ctx = LocalContext.current
