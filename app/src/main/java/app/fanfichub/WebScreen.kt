@@ -43,7 +43,8 @@ private val AD_HOSTS = listOf("googletagmanager.com", "google-analytics.com", "g
     "smartadserver.com", "yieldmo.com", "media.net", "gumgum.com", "indexww.com", "lijit.com", "sovrn.com", "id5-sync.com", "btloader.com", "fundingchoicesmessages.google.com")
 
 /** Feuille de style de lecture aux couleurs et à la taille choisies. */
-private fun readJs(hub: Hub): String {
+private fun readJs(hub: Hub, reader: Boolean = true): String {
+    if (!reader) return "void 0"
     val (_, bg, fg) = THEMES[hub.theme.coerceIn(0, THEMES.size - 1)]
     fun hex(c: Long) = "#%06X".format(c and 0xFFFFFF)
     return READ_JS.replace("SIZE", "${hub.size}").replace("BGC", hex(bg)).replace("FGC", hex(fg))
@@ -112,7 +113,7 @@ FH.batch(JSON.stringify(a.map(function(x){return x.nodeValue})));})()"""
 /** Lecture sur le site, dans l'app, avec un navigateur qui se présente comme Chrome (session conservée). */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun WebScreen(hub: Hub, url: String, title: String) {
+fun WebScreen(hub: Hub, url: String, title: String, reader: Boolean = true) {
     val ctx = LocalContext.current
     var web by remember { mutableStateOf<WebView?>(null) }
     var progress by remember { mutableIntStateOf(0) }
@@ -127,7 +128,7 @@ fun WebScreen(hub: Hub, url: String, title: String) {
                 modifier = Modifier.fillMaxWidth().clickable { chapList = null; web?.loadUrl(l[i].second) }.padding(horizontal = 20.dp, vertical = 12.dp)) }
         }
     } }
-    LaunchedEffect(hub.size, hub.theme) { web?.evaluateJavascript(readJs(hub), null) }
+    LaunchedEffect(hub.size, hub.theme) { web?.evaluateJavascript(readJs(hub, reader), null) }
     if (sizing) androidx.compose.ui.window.Dialog(onDismissRequest = { sizing = false }) {
         Column(Modifier.fillMaxWidth().clip(androidx.compose.foundation.shape.RoundedCornerShape(24.dp)).background(Surf).padding(vertical = 16.dp)) {
             val (_, bg, fg) = THEMES[hub.theme.coerceIn(0, THEMES.size - 1)]
@@ -172,18 +173,18 @@ fun WebScreen(hub: Hub, url: String, title: String) {
                 if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) WebSettingsCompat.setAlgorithmicDarkeningAllowed(settings, true)
                 webViewClient = object : WebViewClient() {
                     override fun shouldOverrideUrlLoading(v: WebView, r: WebResourceRequest) = !r.url.scheme.orEmpty().startsWith("http")
-                    override fun doUpdateVisitedHistory(v: WebView, u: String?, reload: Boolean) { canBack = v.canGoBack(); v.evaluateJavascript(readJs(hub), null) }
+                    override fun doUpdateVisitedHistory(v: WebView, u: String?, reload: Boolean) { canBack = v.canGoBack(); v.evaluateJavascript(readJs(hub, reader), null) }
                     // Pubs et traqueurs bloqués : pages bien plus rapides
                     override fun shouldInterceptRequest(v: WebView, r: WebResourceRequest): android.webkit.WebResourceResponse? {
                         val h = r.url.host.orEmpty()
                         return if (AD_HOSTS.any { h == it || h.endsWith(".$it") }) android.webkit.WebResourceResponse("text/plain", "utf-8", java.io.ByteArrayInputStream(ByteArray(0))) else null
                     }
                     // Style appliqué dès que la page devient visible (pas d'éclair de l'ancienne mise en page)
-                    override fun onPageCommitVisible(v: WebView, u: String?) { v.evaluateJavascript(readJs(hub), null) }
+                    override fun onPageCommitVisible(v: WebView, u: String?) { v.evaluateJavascript(readJs(hub, reader), null) }
                     override fun onPageFinished(v: WebView, u: String?) {
-                        v.evaluateJavascript(readJs(hub), null); v.evaluateJavascript(CLEAN_JS, null)
-                        v.postDelayed({ v.evaluateJavascript(readJs(hub), null) }, 1500)
-                        if ((hub.webFr || hub.autoTr) && tr != "0 %") { tr = "0 %"; v.post { v.evaluateJavascript(TR_JS, null) } }
+                        v.evaluateJavascript(readJs(hub, reader), null); if (reader) v.evaluateJavascript(CLEAN_JS, null)
+                        v.postDelayed({ v.evaluateJavascript(readJs(hub, reader), null) }, 1500)
+                        if (reader && (hub.webFr || hub.autoTr) && tr != "0 %") { tr = "0 %"; v.post { v.evaluateJavascript(TR_JS, null) } }
                     }
                 }
                 webChromeClient = object : WebChromeClient() { override fun onProgressChanged(v: WebView, p: Int) { progress = p } }

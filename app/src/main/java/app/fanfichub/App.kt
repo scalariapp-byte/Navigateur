@@ -30,7 +30,7 @@ sealed interface Screen {
     data class Login(val site: String) : Screen
     data class Detail(val id: String) : Screen
     data class Reader(val id: String) : Screen
-    data class Web(val url: String, val title: String) : Screen
+    data class Web(val url: String, val title: String, val reader: Boolean = true) : Screen
     data class Setup(val site: String) : Screen
     data object Extensions : Screen
 }

@@ -105,7 +105,7 @@ fun HubApp(hub: Hub) {
                     is Screen.Detail -> Detail(hub, s.id)
                     is Screen.Reader -> Reader(hub, s.id)
                     is Screen.Setup -> Setup(hub, s.site)
-                    is Screen.Web -> WebScreen(hub, s.url, s.title)
+                    is Screen.Web -> WebScreen(hub, s.url, s.title, s.reader)
                     is Screen.Extensions -> ExtensionsScreen(hub)
                 }
             }
@@ -628,6 +628,14 @@ fun Accounts(hub: Hub) {
             }
             Line()
             SettingRow({ RoundIcon(Icons.Default.Star) }, "Animation du livre", trail = { Switch(hub.bookAnim) }) { hub.toggleBookAnim(!hub.bookAnim) }
+        }
+        // Commentaires et messages : pages officielles des sites (connexion du navigateur intégré), sans mise en page de lecture
+        Group("Commentaires & messages") {
+            listOf("AO3" to "https://archiveofourown.org/users/${hub.user ?: "login"}/inbox", "Wattpad" to "https://www.wattpad.com/notifications",
+                "FanFiction.net" to "https://www.fanfiction.net/pm2/inbox.php", "Spirit Fanfics" to "https://www.spiritfanfiction.com/notificacoes")
+                .filter { Ext.on(it.first) }.forEach { (n, u) ->
+                    SettingRow({ SiteLogo(n, 40) }, n, "Commentaires, réponses, messages") { hub.push(Screen.Web(u, "$n · messages", reader = false)) }
+                }
         }
         Group("Extensions") {
             SettingRow({ RoundIcon(Icons.Default.Add) }, "Extensions", "${Ext.enabled.size} sites · ${Ext.installed.size} de la communauté") { hub.push(Screen.Extensions) }
