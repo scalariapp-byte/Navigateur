@@ -46,7 +46,8 @@ object Web {
 
     private suspend fun load(url: String, json: Boolean, lane: String): String = lane(lane).let { l -> l.lock.withLock {
         val raw = withContext(Dispatchers.Main) {
-            val w = l.wv ?: WebView(app).apply { settings.javaScriptEnabled = true; settings.domStorageEnabled = true }.also { l.wv = it }
+            val w = l.wv ?: WebView(app).apply { settings.javaScriptEnabled = true; settings.domStorageEnabled = true
+                if (lane == "pc") settings.userAgentString = DESKTOP_UA }.also { l.wv = it }
             withTimeoutOrNull(60_000) {
                 suspendCancellableCoroutine<String> { cont ->
                     var tries = 0
@@ -116,6 +117,7 @@ fun mainText(d: Document): String {
     }?.html() ?: ""
 }
 
+const val DESKTOP_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
 const val BROWSER_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36"
 
 private fun digits(s: String?) = s?.filter { it.isDigit() }?.toIntOrNull() ?: 0
@@ -476,8 +478,13 @@ object Ffn : Site {
     }
 
     /** La page mobile d'une histoire n'a pas de résumé : on le lit dans « My Stories » sur le profil de l'auteur. */
+    private var lastCover = ""
     private suspend fun authorSummary(d: Document, id: String, lane: String): String? {
         val uid = d.select("a[href^=/u/]").firstNotNullOfOrNull { Regex("^/u/(\\d+)").find(it.attr("href"))?.groupValues?.get(1) } ?: return null
+        runCatching { Web.html("$B/u/$uid/", "pc") }.getOrNull()?.selectFirst("div.z-list[data-storyid=$id]")?.let { e ->
+            lastCover = img(e.selectFirst("img"))
+            e.selectFirst("div.z-indent")?.ownText()?.trim()?.takeIf { it.length > 20 }?.let { return it }
+        }
         val p = runCatching { Web.html("$M/u/$uid/", lane) }.getOrNull() ?: return null
         val a = p.select("a[href^=/s/$id/]").firstOrNull { it.text().isNotBlank() && it.text() != "»" } ?: return null
         val box = generateSequence(a.parent()) { it.parent() }.firstOrNull { it.text().length > a.text().length + 20 || it.tagName() == "div" } ?: return null
@@ -514,8 +521,8 @@ object Ffn : Site {
         val fandom = d.select("#pre_story_links a").lastOrNull()?.text() ?: Regex(", an? (.+?) fanfic", IC).find(pageTitle)?.groupValues?.get(1) ?: name
         val metaEl = d.select("span.xgray, div.gray, .gray, div").firstOrNull { Regex("words?:", IC).containsMatchIn(it.ownText()) || Regex("words?:", IC).containsMatchIn(it.text()) && it.text().length < 600 }
         return work(id, title, d.selectFirst("a[href^=/u/]")?.text() ?: "", fandom, metaEl?.text() ?: text.take(2000),
-            d.selectFirst("#profile_top div.xcontrast_txt")?.text()?.ifBlank { null } ?: authorSummary(d, id, lane) ?: metaDesc(d),
-            img(d.selectFirst("#profile_top img.cimage, img.cimage")).ifBlank { d.selectFirst("meta[property=og:image]")?.attr("content") ?: "" })
+            (d.selectFirst("#profile_top div.xcontrast_txt")?.text()?.ifBlank { null } ?: run { lastCover = ""; authorSummary(d, id, lane) } ?: metaDesc(d)),
+            img(d.selectFirst("#profile_top img.cimage, img.cimage")).ifBlank { lastCover }.ifBlank { d.selectFirst("meta[property=og:image]")?.attr("content") ?: "" })
     }
 
     override suspend fun download(w: Work): Pair<List<String>, String> {
@@ -563,6 +570,11 @@ object Ffn : Site {
                 added++
             }
             if (added == 0) break
+        }
+        // Couvertures : seulement sur la version ordinateur du profil (une seule page pour tous les favoris)
+        if (out.isNotEmpty()) runCatching { Web.html("$B/u/$uid/", "pc") }.getOrNull()?.select("div.z-list[data-storyid]")?.forEach { e ->
+            val k = e.attr("data-storyid"); val c = img(e.selectFirst("img")); val w = out[k]
+            if (w != null && c.isNotBlank()) out[k] = w.copy(cover = c)
         }
         if (out.isEmpty()) {
             // Repli : version ordinateur (blocs « favstories » avec attributs data-*)
