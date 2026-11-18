@@ -37,14 +37,21 @@ import androidx.webkit.WebViewFeature
 
 /** Masque les encarts d'inscription, recommandations, pieds de page et bannières (relancé quand la page change). */
 /** Mise en page de lecture : fond sombre, texte large et aéré, barres/bannières/pubs masquées (AO3, FF.net, Wattpad, Spirit). */
-private const val READ_JS = """(function(){if(document.getElementById('fhread'))return;var s=document.createElement('style');s.id='fhread';s.textContent=
+private const val READ_JS = """(function(){var s=document.getElementById('fhread')||document.createElement('style');s.id='fhread';s.textContent=
 'html,body{background:#111!important;color:#e8e6e3!important}'+
 '.announcement,[class*=announcement],#admin-banner,.admin-banner,header,nav,#header,#footer,#skiplinks,.landmark,.notice,ul.work.navigation.actions,dl.work.meta,#top,.lc-wrapper,#p_footer,.navbar,#smartbanner,.smartbanner,[class*=smartbanner],[class*=Advertisement],[class*=advert],[class*=ad-container],[data-testid*=ad],[id*=google_ads],.adsbygoogle{display:none!important}'+
 '#chapters,.userstuff,#storytext,#storycontent,.texto,#texto,#conteudoTexto,.part-content,pre{max-width:720px!important;margin:0 auto!important;padding:0 18px!important;background:transparent!important}'+
-'#chapters p,.userstuff p,#storytext p,#storytext,#storycontent p,.texto p,#texto p,#conteudoTexto p,.part-content p,pre p{font-family:Georgia,"Noto Serif",serif!important;font-size:19px!important;line-height:1.8!important;color:#e8e6e3!important;margin:0 0 1.05em!important;text-align:left!important}'+
+'#chapters p,.userstuff p,#storytext p,#storytext,#storycontent p,.texto p,#texto p,#conteudoTexto p,.part-content p,pre p{font-family:Georgia,"Noto Serif",serif!important;font-size:SIZEpx!important;line-height:1.8!important;color:#e8e6e3!important;margin:0 0 1.05em!important;text-align:left!important}'+
 'h1,h2,h3,.title{color:#fff!important;line-height:1.3!important}a{color:#b9a7ff!important}img{max-width:100%!important;height:auto!important}'+
-'body{padding-bottom:40px!important;-webkit-text-size-adjust:100%!important}';
-document.head.appendChild(s)})()"""
+'body{padding-bottom:40px!important;-webkit-text-size-adjust:100%!important}'+
+'blockquote{margin:0 0 1em!important;padding:0 0 0 10px!important}.preface,.notes,.summary{padding:0 14px!important}'+
+'.fhfold{max-height:5.4em!important;overflow:hidden!important;position:relative}.fhmore{color:#b9a7ff;font-size:14px;font-weight:bold;padding:6px 0 12px;cursor:pointer}';
+if(!s.parentNode)document.head.appendChild(s);
+// Résumé et notes repliés : « Tout afficher » pour déplier
+document.querySelectorAll('.preface .summary blockquote,.preface .notes blockquote,#work_endnotes blockquote,.end.notes blockquote,[class*=notas]').forEach(function(b){
+ if(b.__fh||b.scrollHeight<130)return;b.__fh=1;b.classList.add('fhfold');var m=document.createElement('div');m.className='fhmore';m.textContent='Tout afficher ▾';
+ m.onclick=function(){var o=b.classList.toggle('fhfold');m.textContent=o?'Tout afficher ▾':'Réduire ▴'};b.parentNode.insertBefore(m,b.nextSibling)});
+})()"""
 
 private const val CLEAN_JS = """(function(){
 var P=['Rejoins la plus grande','Join the largest','Cela pourrait aussi te plaire','You may also like','Télécharger l','Download the','Essayer Premium','Try Premium','Signaler cette histoire','Report this story','Directives du Contenu','Content Guidelines','Partenariats avec','Ouvrir dans l','Open in app','Inscris-toi','Sign up','Cadastre-se','Baixe o app'];
@@ -82,6 +89,20 @@ fun WebScreen(hub: Hub, url: String, title: String) {
     var canBack by remember { mutableStateOf(false) }
     var tr by remember { mutableStateOf<String?>(null) } // null = VO, "…" = en cours, "FR" = traduit
     BackHandler { if (canBack) web?.goBack() else hub.pop() }
+    var sizing by remember { mutableStateOf(false) }
+    if (sizing) androidx.compose.ui.window.Dialog(onDismissRequest = { sizing = false }) {
+        Column(Modifier.fillMaxWidth().clip(androidx.compose.foundation.shape.RoundedCornerShape(24.dp)).background(Surf).padding(20.dp)) {
+            Text("Taille du texte · ${hub.size}", color = Txt, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+            // Aperçu : même police, même taille que la page
+            Box(Modifier.padding(vertical = 14.dp).fillMaxWidth().clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp)).background(Color(0xFF111111)).padding(16.dp)) {
+                Text("Luffy regarda l'horizon, le chapeau de paille vissé sur la tête. Quelque part, au-delà des vagues, l'attendait la plus grande aventure du monde.",
+                    color = Color(0xFFE8E6E3), fontSize = hub.size.sp, lineHeight = (hub.size * 1.8f).sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Serif)
+            }
+            androidx.compose.material3.Slider(value = hub.size.toFloat(), onValueChange = { v ->
+                hub.setReader(s = v.toInt()); web?.evaluateJavascript(READ_JS.replace("SIZE", "${v.toInt()}"), null)
+            }, valueRange = 14f..30f, steps = 15, colors = androidx.compose.material3.SliderDefaults.colors(thumbColor = A1, activeTrackColor = A1))
+        }
+    }
     Column(Modifier.fillMaxSize().background(Bg)) {
         Row(Modifier.statusBarsPadding().padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             CircleIcon(Icons.AutoMirrored.Filled.ArrowBack) { if (canBack) web?.goBack() else hub.pop() }
@@ -94,6 +115,8 @@ fun WebScreen(hub: Hub, url: String, title: String) {
                         "FR" -> { hub.toggleWebFr(false); tr = null; web?.reload() }
                     }
                 }.padding(horizontal = 14.dp, vertical = 10.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("Aa", color = Txt, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clip(CircleShape).background(Surf2).clickable { sizing = true }.padding(horizontal = 12.dp, vertical = 10.dp))
             Spacer(Modifier.width(8.dp))
             CircleIcon(Icons.Default.Refresh) { tr = null; web?.reload() }
             Spacer(Modifier.width(8.dp))
@@ -111,7 +134,7 @@ fun WebScreen(hub: Hub, url: String, title: String) {
                     override fun shouldOverrideUrlLoading(v: WebView, r: WebResourceRequest) = !r.url.scheme.orEmpty().startsWith("http")
                     override fun doUpdateVisitedHistory(v: WebView, u: String?, reload: Boolean) { canBack = v.canGoBack() }
                     override fun onPageFinished(v: WebView, u: String?) {
-                        v.evaluateJavascript(READ_JS, null); v.evaluateJavascript(CLEAN_JS, null)
+                        v.evaluateJavascript(READ_JS.replace("SIZE", "${hub.size}"), null); v.evaluateJavascript(CLEAN_JS, null)
                         if ((hub.webFr || hub.autoTr) && tr != "0 %") { tr = "0 %"; v.postDelayed({ v.evaluateJavascript(TR_JS, null) }, 600) }
                     }
                 }
