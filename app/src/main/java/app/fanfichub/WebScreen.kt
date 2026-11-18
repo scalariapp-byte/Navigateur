@@ -199,7 +199,7 @@ fun WebScreen(hub: Hub, url: String, title: String) {
                                 val res = Translator.texts(items) { p -> tr = "${(p * 100).toInt()} %" }
                                 view.evaluateJavascript("fhApply(" + JSONArray(res).toString() + ")", null)
                                 tr = "FR"
-                            } catch (e: Exception) { tr = null; view.evaluateJavascript("alert(" + JSONObject.quote("Traduction impossible : " + e.message) + ")", null) }
+                            } catch (e: Exception) { tr = null; hub.status = "Traduction indisponible pour le moment, réessaie dans un instant" }
                         }
                     }
                 }, "FH")

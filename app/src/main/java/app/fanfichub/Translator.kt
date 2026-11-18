@@ -20,7 +20,28 @@ import java.net.URLEncoder
  * (nécessite Internet).
  */
 object Translator {
-    private suspend fun google(text: String): String = withContext(Dispatchers.IO) {
+    /** Google limite les rafales (429) : on réessaie en patientant, en alternant deux points d'accès. */
+    private suspend fun google(text: String): String {
+        var last: Exception? = null
+        for (attempt in 0..4) {
+            try { return if (attempt % 2 == 0) gtx(text) else dict(text) }
+            catch (e: Exception) { last = e; kotlinx.coroutines.delay(700L shl attempt) }
+        }
+        throw last!!
+    }
+
+    private suspend fun dict(text: String): String = withContext(Dispatchers.IO) {
+        val c = URL("https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=auto&tl=fr").openConnection() as HttpURLConnection
+        c.requestMethod = "POST"; c.doOutput = true; c.connectTimeout = 15000; c.readTimeout = 30000
+        c.setRequestProperty("Content-Type", "application/x-www-form-urlencoded;charset=UTF-8")
+        c.setRequestProperty("User-Agent", BROWSER_UA)
+        c.outputStream.use { it.write(("q=" + URLEncoder.encode(text, "UTF-8")).toByteArray()) }
+        if (c.responseCode != 200) error("Google Traduction a répondu ${c.responseCode}")
+        val a = JSONArray(c.inputStream.bufferedReader().readText())
+        a.opt(0).let { if (it is JSONArray) it.optString(0) else a.optString(0) }
+    }
+
+    private suspend fun gtx(text: String): String = withContext(Dispatchers.IO) {
         val c = URL("https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=fr&dt=t").openConnection() as HttpURLConnection
         c.requestMethod = "POST"; c.doOutput = true; c.connectTimeout = 15000; c.readTimeout = 30000
         c.setRequestProperty("Content-Type", "application/x-www-form-urlencoded;charset=UTF-8")
@@ -47,13 +68,13 @@ object Translator {
             cur += i; len += src[i].length + 2
         }
         if (cur.isNotEmpty()) groups += cur
-        val sem = Semaphore(4); var done = 0
+        val sem = Semaphore(2); var done = 0
         groups.map { g ->
             async {
                 sem.withPermit {
                     val res = google(g.joinToString("\n\n") { src[it] }).split(Regex("\n\\s*\n"))
                     if (res.size == g.size) g.forEachIndexed { k, i -> out[i] = res[k].trim() }
-                    else g.forEach { i -> out[i] = google(src[i]).trim() }
+                    else g.forEach { i -> out[i] = google(src[i]).trim(); kotlinx.coroutines.delay(150) }
                     done += g.size; progress(done.toFloat() / maxOf(1, todo.size))
                 }
             }
