@@ -273,9 +273,8 @@ fun SitePicker(hub: Hub) {
 fun SiteChips(hub: Hub) {
     val counts = remember(hub.works.size, hub.syncing) { hub.works.groupingBy { it.site }.eachCount() }
     Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        val allOn = hub.site == "ALL"
-        Box(Modifier.weight(1f).height(44.dp).clip(CircleShape).background(if (allOn) Grad else SolidColor(Surf2)).clickable { hub.pickSite("ALL") },
-            contentAlignment = Alignment.Center) { Text("Tous", color = if (allOn) Color.White else Mut, fontWeight = FontWeight.SemiBold, fontSize = 13.sp) }
+        // Plus de « Tous » : on reste toujours sur un site (le plus fourni par défaut)
+        LaunchedEffect(hub.site) { if (hub.site == "ALL") hub.pickSite(SITE_UI.maxByOrNull { counts[it.name] ?: 0 }?.name ?: "AO3") }
         SITE_UI.forEach { s ->
             val on = hub.site == s.name
             Row(Modifier.weight(1f).height(44.dp).clip(CircleShape).background(if (on) s.color else Surf2).clickable { hub.pickSite(s.name) },
