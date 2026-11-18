@@ -616,6 +616,25 @@ object Spirit : Site {
         return cards(Web.html("$B/busca?query=${URLEncoder.encode(q.trim(), "UTF-8")}&pagina=$page$extra", "ui"), "Recherche")
     }
 
+    /**
+     * Spirit charge les images en différé : « src » vaut un leurre (img/common/1.gif) et la vraie adresse
+     * est dans un autre attribut (data-original, data-src, srcset…). On prend la première vraie image.
+     */
+    private fun realImg(box: org.jsoup.nodes.Element): String {
+        val bad = Regex("/common/|\\.gif($|\\?)|avatar|perfil", RegexOption.IGNORE_CASE)
+        val imgExt = Regex("\\.(jpe?g|png|webp)", RegexOption.IGNORE_CASE)
+        for (img in box.select("img, source")) for (at in img.attributes()) {
+            val v = at.value.trim().split(Regex("[\\s,]+")).firstOrNull { imgExt.containsMatchIn(it) } ?: continue
+            val abs = if (v.startsWith("//")) "https:$v" else if (v.startsWith("/")) "https://www.spiritfanfiction.com$v" else v
+            if (abs.startsWith("http") && !bad.containsMatchIn(abs)) return abs
+        }
+        // Image en arrière-plan CSS
+        box.select("[style*=url]").forEach { e -> Regex("url\\(['\"]?([^'\")]+)").find(e.attr("style"))?.groupValues?.get(1)?.let { u ->
+            val abs = if (u.startsWith("//")) "https:$u" else u
+            if (abs.startsWith("http") && !bad.containsMatchIn(abs)) return abs } }
+        return ""
+    }
+
     /** Un texte de lien qui ressemble à une adresse ou à un identifiant (« one-piece-luffy-123 ») n'est pas un titre. */
     private fun slugLike(t: String) = t.isBlank() || (!t.trim().contains(' ') && t.contains('-')) || t.startsWith("http")
 
@@ -641,7 +660,7 @@ object Spirit : Site {
             val cat = Regex("Categorias\\s+(.+?)(?:\\s+G[êe]neros|\\s+Personagens|$)", ic).find(t)?.groupValues?.get(1)?.trim()?.take(80) ?: name
             val summary = box.select("p, div").filter { it.children().isEmpty() || it.tagName() == "p" }.map { it.text() }
                 .filter { it.length > 60 && !it.contains("escrita por", true) && !it.startsWith("Categorias") && !it.startsWith("Gêneros") }.maxByOrNull { it.length } ?: ""
-            val im = box.selectFirst("img")?.let { it.absUrl("data-src").ifBlank { it.absUrl("src") } } ?: ""
+            val im = realImg(box)
             out["sp:$sl"] = Work("sp:$sl", title, Regex("escrita por\\s+(\\S+)", ic).find(t)?.groupValues?.get(1) ?: "", listOf(cat.substringBefore(",").trim()), "",
                 digits(Regex("Palavras\\s+([\\d.]+)", ic).find(t)?.groupValues?.get(1)), "$n/${if (done) n else "?"}",
                 0, summary, emptyList(), Regex("Atualizada(?: em)?\\s+(.+?)\\s+Idioma", ic).find(t)?.groupValues?.get(1) ?: "", done, setOf(src),
@@ -709,16 +728,28 @@ object Spirit : Site {
         }
         // Listes de lecture : liens « lista » du profil et de la page « Veja todas as Listas de leitura »
         val lists = LinkedHashMap<String, String>() // url -> nom
+        val overviewPages = LinkedHashSet<String>()
         fun collectLists(d: Document) = d.select("a[href*=lista]").forEach { a ->
+            val href = a.absUrl("href").substringBefore('#')
+            // « listas?pagina=2 » = page suivante de l'aperçu des listes : à parcourir, pas une liste
+            if (Regex("/listas/?(\\?|$)").containsMatchIn(href)) { if ("pagina=" in href) overviewPages += href; return@forEach }
+            if (!Regex("/listas/[^/?#]+-\\d+").containsMatchIn(href)) return@forEach
             val name = a.text().replace(Regex("\\s*\\d+\\s+hist[óo]rias?.*$", ic), "").trim()
             if (name.isBlank() || name.startsWith("Veja", true) || name.contains("Listas de leitura", true)) return@forEach
-            lists.putIfAbsent(a.absUrl("href").substringBefore('#'), name)
+            lists.putIfAbsent(href, name)
         }
         for (path in listOf("/perfil/$u", "/perfil/$u/listas")) {
             val d = runCatching { Web.html(B + path) }.getOrNull() ?: continue
             collectLists(d)
             d.select("a").firstOrNull { it.text().contains("Listas de leitura", true) && it.text().startsWith("Veja", true) }?.absUrl("href")
                 ?.let { all -> runCatching { Web.html(all) }.getOrNull()?.let { collectLists(it) } }
+        }
+        // Pages suivantes de l'aperçu des listes (au-delà de 10 listes)
+        val doneOv = HashSet<String>()
+        while (true) {
+            val next = overviewPages.firstOrNull { it !in doneOv } ?: break
+            doneOv += next; if (doneOv.size > 15) break
+            runCatching { Web.html(next) }.getOrNull()?.let { collectLists(it) }
         }
         Diag.log("Listes trouvées : ${lists.size}")
         lists.forEach { (h, n) -> Diag.log("  • $n → $h") }
