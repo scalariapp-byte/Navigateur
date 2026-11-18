@@ -46,7 +46,7 @@ private fun readJs(hub: Hub): String {
 /** Mise en page de lecture : fond sombre, texte large et aéré, barres/bannières/pubs masquées (AO3, FF.net, Wattpad, Spirit). */
 private const val READ_JS = """(function(){var s=document.getElementById('fhread')||document.createElement('style');s.id='fhread';s.textContent=
 'html,body{background:BGC!important;color:FGC!important}'+
-'.announcement,[class*=announcement],#admin-banner,.admin-banner,header,nav,#header,#footer,#skiplinks,.landmark,.notice,ul.work.navigation.actions,dl.work.meta,#top,.lc-wrapper,#p_footer,.navbar,#smartbanner,.smartbanner,[class*=smartbanner],[class*=Advertisement],[class*=advert],[class*=ad-container],[data-testid*=ad],[id*=google_ads],.adsbygoogle{display:none!important}'+
+'#kudos,#add_comment_placeholder,#comments_placeholder,#new_comment,.new_comment,[id^=add_comment],#show_comments_link,#show_comments_link_top,li.collections,.kudos,#feedback .comment,#feedback h3.landmark,.announcement,[class*=announcement],#admin-banner,.admin-banner,header,nav,#header,#footer,#skiplinks,.landmark,.notice,ul.work.navigation.actions,dl.work.meta,#top,.lc-wrapper,#p_footer,.navbar,#smartbanner,.smartbanner,[class*=smartbanner],[class*=Advertisement],[class*=advert],[class*=ad-container],[data-testid*=ad],[id*=google_ads],.adsbygoogle{display:none!important}'+
 '#chapters,.userstuff,#storytext,#storycontent,.texto,#texto,#conteudoTexto,.part-content,pre{max-width:720px!important;margin:0 auto!important;padding:0 18px!important;background:transparent!important}'+
 '#chapters p,.userstuff p,#storytext p,#storytext,#storycontent p,.texto p,#texto p,#conteudoTexto p,.part-content p,pre p{font-family:Georgia,"Noto Serif",serif!important;font-size:SIZEpx!important;line-height:1.8!important;color:FGC!important;margin:0 0 1.05em!important;text-align:left!important}'+
 'h1,h2,h3,.title{color:FGC!important;line-height:1.3!important}a{color:#b9a7ff!important}img{max-width:100%!important;height:auto!important}'+
@@ -83,6 +83,16 @@ function clean(){
 clean();if(!window.__fhObs){window.__fhObs=new MutationObserver(function(){clearTimeout(window.__fhT);window.__fhT=setTimeout(clean,300)});
 window.__fhObs.observe(document.documentElement,{childList:true,subtree:true})}})()"""
 
+/** Liste des chapitres de la page (AO3 et FF.net : menu déroulant ; Wattpad et Spirit : liens). */
+private const val CHAP_JS = """(function(){var h=location.host,o=[],m;
+var sel=document.querySelector('#selected_id,#chap_select,select[name=chapter],select[name=chapters]');
+if(sel&&(m=location.pathname.match(/\/works\/(\d+)/)))sel.querySelectorAll('option').forEach(function(x){o.push([x.textContent.trim(),'/works/'+m[1]+'/chapters/'+x.value])});
+else if(sel&&(m=location.pathname.match(/\/s\/(\d+)/)))sel.querySelectorAll('option').forEach(function(x){o.push([x.textContent.trim(),'/s/'+m[1]+'/'+x.value+'/'])});
+else{var p=h.indexOf('wattpad')>=0?/wattpad\.com\/\d+-/:h.indexOf('spirit')>=0?/\/historia\/[^\/]+\/[^\/?#]+/:/\/s\/\d+\/\d+/;
+document.querySelectorAll('a[href]').forEach(function(a){var t=a.textContent.trim();if(p.test(a.href)&&t&&t!=='»')o.push([t,a.href])})}
+var s={};o=o.filter(function(x){x[1]=new URL(x[1],location.href).href;if(s[x[1]])return 0;return s[x[1]]=1});
+FH.chapters(JSON.stringify(o))})()"""
+
 /** Envoie les textes visibles de la page au traducteur, puis les remplace (mise en page conservée). */
 private const val TR_JS = """(function(){
 var w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT,{acceptNode:function(n){
@@ -102,6 +112,13 @@ fun WebScreen(hub: Hub, url: String, title: String) {
     var tr by remember { mutableStateOf<String?>(null) } // null = VO, "…" = en cours, "FR" = traduit
     BackHandler { if (canBack) web?.goBack() else hub.pop() }
     var sizing by remember { mutableStateOf(false) }
+    var chapList by remember { mutableStateOf<List<Pair<String, String>>?>(null) }
+    chapList?.let { l -> androidx.compose.ui.window.Dialog(onDismissRequest = { chapList = null }) {
+        androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxWidth().heightIn(max = 560.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(24.dp)).background(Surf).padding(vertical = 10.dp)) {
+            items(l.size) { i -> Text(l[i].first, color = Txt, fontSize = 15.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth().clickable { chapList = null; web?.loadUrl(l[i].second) }.padding(horizontal = 20.dp, vertical = 12.dp)) }
+        }
+    } }
     LaunchedEffect(hub.size, hub.theme) { web?.evaluateJavascript(readJs(hub), null) }
     if (sizing) androidx.compose.ui.window.Dialog(onDismissRequest = { sizing = false }) {
         Column(Modifier.fillMaxWidth().clip(androidx.compose.foundation.shape.RoundedCornerShape(24.dp)).background(Surf).padding(vertical = 16.dp)) {
@@ -129,11 +146,12 @@ fun WebScreen(hub: Hub, url: String, title: String) {
                     }
                 }.padding(horizontal = 14.dp, vertical = 10.dp))
             Spacer(Modifier.width(8.dp))
+            Text("☰", color = Txt, fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clip(CircleShape).background(Surf2).clickable { web?.evaluateJavascript(CHAP_JS, null) }.padding(horizontal = 12.dp, vertical = 8.dp))
+            Spacer(Modifier.width(8.dp))
             Text("Aa", color = Txt, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.clip(CircleShape).background(Surf2).clickable { sizing = true }.padding(horizontal = 12.dp, vertical = 10.dp))
             Spacer(Modifier.width(8.dp))
             CircleIcon(Icons.Default.Refresh) { tr = null; web?.reload() }
-            Spacer(Modifier.width(8.dp))
-            CircleIcon(Icons.Default.Share) { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(web?.url ?: url))) }
+
         }
         Box(Modifier.fillMaxWidth().height(2.dp)) { if (progress in 1..99) Bar(progress / 100f, A1) }
         AndroidView(factory = { c ->
@@ -154,6 +172,11 @@ fun WebScreen(hub: Hub, url: String, title: String) {
                 webChromeClient = object : WebChromeClient() { override fun onProgressChanged(v: WebView, p: Int) { progress = p } }
                 val view = this
                 addJavascriptInterface(object {
+                    @JavascriptInterface fun chapters(json: String) {
+                        val a = JSONArray(json)
+                        val l = (0 until a.length()).map { a.getJSONArray(it).let { x -> x.getString(0) to x.getString(1) } }
+                        hub.scope.launch { if (l.isEmpty()) hub.status = "Liste des chapitres introuvable sur cette page" else chapList = l }
+                    }
                     @JavascriptInterface fun batch(json: String) {
                         hub.scope.launch {
                             try {
