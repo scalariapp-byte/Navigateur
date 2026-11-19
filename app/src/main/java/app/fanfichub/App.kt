@@ -83,6 +83,8 @@ class Hub(ctx: Context) {
     fun startUpdate() { scope.launch { doUpdate() } }
     fun startImport(url: String) { scope.launch { importUrl(url) } }
     private var lastCheck = 0L
+    // Vérifie aussi toutes les 2 min tant que l'app est ouverte (une version publiée apparaît sans relancer l'app)
+    init { scope.launch { while (true) { kotlinx.coroutines.delay(120_000); runCatching { checkUpdate() } } } }
     fun startCheck(manual: Boolean = false) {
         if (!manual && System.currentTimeMillis() - lastCheck < 60_000) return
         lastCheck = System.currentTimeMillis(); scope.launch { checkUpdate(manual) }

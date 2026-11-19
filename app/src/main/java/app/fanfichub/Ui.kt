@@ -382,7 +382,7 @@ fun SiteStateCard(hub: Hub) {
 @Composable
 fun Feed(hub: Hub) {
     val fresh = remember(hub.works.size, hub.syncing) { hub.works.filter { it.newChapters > 0 }.sortedByDescending { it.newChapters } }
-    val reading = remember(hub.works.size, hub.syncing, hub.stack.size) { hub.works.filter { it.progress > 0.01f && it.progress < 0.985f }.sortedByDescending { it.lastRead } }
+    val reading = remember(hub.works.size, hub.syncing) { hub.works.filter { it.progress > 0.01f && it.progress < 0.985f }.sortedByDescending { it.lastRead } }
     val h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 120.dp)) {
         item { Title("FANFIC HUB", (if (h in 5..17) "Bonjour" else "Bonsoir") + (hub.user?.let { ", $it" } ?: "")) }
