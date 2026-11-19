@@ -53,21 +53,24 @@ object Art {
      * (fonds vides, images par défaut). Résultat mis en cache.
      */
     suspend fun good(url: String): Boolean {
-        val key = "q:$url"
+        val key = "q2:$url"
         if (prefs.contains(key)) return prefs.getBoolean(key, false)
         val ok = runCatching {
             val b = Img.load(url)?.asAndroidBitmap() ?: return@runCatching false
             if (b.width < 100 || b.height < 120) return@runCatching false
             // Portrait obligatoire : les images couchées ou en bandeau coupent les têtes dans une demi-couverture
             if (b.height < b.width * 1.05f) return@runCatching false
-            var sum = 0.0; var sq = 0.0; var n = 0
+            var sum = 0.0; var sq = 0.0; var n = 0; var skin = 0
             for (y in 0 until 16) for (x in 0 until 16) {
                 val p = b.getPixel(x * (b.width - 1) / 15, (y * (b.height - 1) / 15))
                 val l = 0.299 * ((p shr 16) and 255) + 0.587 * ((p shr 8) and 255) + 0.114 * (p and 255)
                 sum += l; sq += l * l; n++
+                val r = (p shr 16) and 255; val g = (p shr 8) and 255; val bl = p and 255
+                if (r > 95 && g > 40 && bl > 20 && r > g && r > bl && r - minOf(g, bl) > 15 && r - g > 15) skin++
             }
             val mean = sum / n; val sd = kotlin.math.sqrt((sq / n - mean * mean).coerceAtLeast(0.0))
-            mean in 25.0..225.0 && sd > 30
+            // Gros plan (bouche, main, visage zoomé) = trop de peau sur l'image → rejeté
+            mean in 25.0..225.0 && sd > 30 && skin < n * 0.33
         }.getOrDefault(false)
         prefs.edit().putBoolean(key, ok).apply(); return ok
     }
