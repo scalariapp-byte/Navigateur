@@ -534,10 +534,26 @@ class Hub(ctx: Context) {
         } } catch (e: Exception) {
             publish()
             syncInfo = "Synchro interrompue : ${e.message ?: "réseau indisponible"}"
-        } finally { syncing = false; syncProgress = null; prefetchCovers() }
+        } finally { syncing = false; syncProgress = null; fillArt(); prefetchCovers() }
     }
 
     /** Couvertures préchargées en arrière-plan : les étagères s'affichent sans attendre. */
+    /** Couvertures illustrées (AniList) pour les fiches AO3 sans image ; 2 requêtes par seconde au plus. */
+    private var arting = false
+    fun fillArt() {
+        if (arting) return; arting = true
+        scope.launch {
+            try {
+                for (w in works.filter { it.site == "AO3" && it.cover.isBlank() }.take(80)) {
+                    val url = runCatching { Art.forWork(w) }.getOrNull() ?: continue
+                    val i = works.indexOfFirst { it.id == w.id }; if (i >= 0) works[i] = works[i].copy(cover = url)
+                    kotlinx.coroutines.delay(500)
+                }
+                persist()
+            } finally { arting = false }
+        }
+    }
+
     fun prefetchCovers() { scope.launch { Img.prefetch(works.sortedByDescending { it.lastRead }.map { it.cover }) } }
 
     /** Vrai une seule fois après l'installation d'une nouvelle version. */
@@ -576,7 +592,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         Web.app = applicationContext
         Img.dir = java.io.File(cacheDir, "img").apply { mkdirs() }
-        Ext.init(this)
+        Ext.init(this); Art.init(this)
         hub = Hub(this)
         handle(intent)
         setContent { HubApp(hub) }

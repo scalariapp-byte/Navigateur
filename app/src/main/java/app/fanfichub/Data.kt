@@ -137,7 +137,7 @@ object Ao3 {
             title = a.text(), author = b.select("a[rel=author]").joinToString { it.text() }.ifEmpty { "Anonyme" },
             fandoms = b.select("h5.fandoms a.tag").map { it.text() }, rating = b.selectFirst("span.rating")?.attr("title") ?: "",
             words = num(b.selectFirst("dd.words")?.text()), chapters = ch, kudos = num(b.selectFirst("dd.kudos")?.text()),
-            summary = b.selectFirst("blockquote.summary")?.text() ?: "", tags = b.select("li.freeforms a.tag").map { it.text() }.take(14),
+            summary = b.selectFirst("blockquote.summary")?.text() ?: "", tags = (b.select("li.characters a.tag").map { it.text() }.take(6) + b.select("li.freeforms a.tag").map { it.text() }).take(20),
             updated = b.selectFirst("p.datetime")?.text() ?: "", complete = complete(ch), sources = setOf(src),
         )
     }

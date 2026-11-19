@@ -20,7 +20,7 @@ import java.util.concurrent.TimeUnit
 /** Synchro automatique toutes les 3 h (réseau requis) + notification des nouveaux chapitres. */
 class BackgroundSync(ctx: Context, p: WorkerParameters) : CoroutineWorker(ctx, p) {
     override suspend fun doWork(): Result {
-        Ext.init(applicationContext)
+        Ext.init(applicationContext); Art.init(applicationContext)
         val ctx = applicationContext
         Web.app = ctx
         val hub = Hub(ctx)
