@@ -544,11 +544,11 @@ class Hub(ctx: Context) {
         if (arting) return; arting = true
         scope.launch {
             try {
-                for (w in works.filter { it.site == "AO3" && it.cover.isBlank() }.take(80)) {
-                    val url = runCatching { Art.forWork(w) }.getOrNull() ?: continue
-                    val i = works.indexOfFirst { it.id == w.id }; if (i >= 0) works[i] = works[i].copy(cover = url)
-                    kotlinx.coroutines.delay(500)
-                }
+                // 3 à la fois ; les noms déjà connus sont instantanés (cache), on n'attend que les nouveaux
+                val gate = kotlinx.coroutines.sync.Semaphore(3)
+                works.filter { it.site == "AO3" && (it.cover.isBlank() || "anilist" in it.cover) }.map { w -> async { gate.withPermit {
+                    runCatching { Art.forWork(w) }.getOrNull()?.let { url -> val i = works.indexOfFirst { it.id == w.id }; if (i >= 0 && works[i].cover != url) works[i] = works[i].copy(cover = url) }
+                } } }.awaitAll()
                 persist()
             } finally { arting = false }
         }
