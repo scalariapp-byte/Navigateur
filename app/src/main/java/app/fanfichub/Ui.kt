@@ -478,16 +478,18 @@ fun Library(hub: Hub) {
         item {
             Row(Modifier.statusBarsPadding().padding(start = 22.dp, end = 14.dp, top = 22.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("BIBLIOTHÈQUE", style = TextStyle(brush = Grad, fontSize = 13.sp, fontWeight = FontWeight.Black, letterSpacing = 3.sp))
-                    Text(col?.let { collectionName(it) } ?: if (site == "ALL") "Tout" else site, color = Txt, fontSize = 30.sp, fontWeight = FontWeight.Bold,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis)
                     // Nombre de fics du site : chaque histoire comptée une fois, même si elle est dans plusieurs listes
                     val stats = remember(visible.size, site) {
                         val unique = visible.distinctBy { it.title.lowercase().trim() + "|" + it.author.lowercase().trim() }.size
                         val inLists = visible.sumOf { w -> w.sources.count { it != "Recherche" }.coerceAtLeast(1) }
                         Triple(visible.size, unique, inLists)
                     }
-                    Text(fmtFull(stats.second), color = Mut, fontSize = 13.sp)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("BIBLIOTHÈQUE", style = TextStyle(brush = Grad, fontSize = 13.sp, fontWeight = FontWeight.Black, letterSpacing = 3.sp))
+                        Text("  ${fmtFull(stats.second)} fanfictions", color = Mut, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                    }
+                    Text(col?.let { collectionName(it) } ?: if (site == "ALL") "Tout" else site, color = Txt, fontSize = 30.sp, fontWeight = FontWeight.Bold,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 // Tri : bouton discret, les choix s'ouvrent au toucher
                 if (!selecting) Box {
