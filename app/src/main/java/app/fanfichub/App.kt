@@ -565,22 +565,36 @@ class Hub(ctx: Context) {
     /** Couvertures illustrées (AniList) pour les fiches AO3 sans image ; 2 requêtes par seconde au plus. */
     private var arting = false
     private var artLog = "jamais lancé"
+    /** Version du choix des couvertures : on ne recalcule une histoire que si l'algorithme a changé depuis. */
+    private val ART_V = 4
     fun fillArt() {
         if (arting) return; arting = true
         Art.used.clear()
         scope.launch {
             val t0 = System.currentTimeMillis(); var done = 0; var changed = 0; var fail = 0
-            val todo = works.count { it.site == "AO3" && (it.cover.isBlank() || "anilist" in it.cover || "myanimelist" in it.cover) }
-            artLog = "en cours : 0/$todo"
+            val doneIds = if (prefs.getInt("artV", 0) == ART_V) prefs.getStringSet("artDone", emptySet())!!.toMutableSet() else mutableSetOf()
+            val todoList = works.filter { it.site == "AO3" && (it.cover.isBlank() || (("anilist" in it.cover || "myanimelist" in it.cover) && it.id !in doneIds)) }
+            val todo = todoList.size
+            artLog = if (todo == 0) "à jour (rien à recalculer)" else "en cours : 0/$todo"
+            val pending = HashMap<String, String>()
+            fun apply() { if (pending.isEmpty()) return
+                // Une seule mise à jour de la liste par lot : évite de redessiner la bibliothèque à chaque couverture
+                var any = false
+                for ((id, url) in pending) { val i = works.indexOfFirst { it.id == id }; if (i >= 0 && works[i].cover != url) { works[i] = works[i].copy(cover = url); changed++; any = true } }
+                pending.clear(); if (any) persist()
+                prefs.edit().putInt("artV", ART_V).putStringSet("artDone", HashSet(doneIds)).apply()
+            }
             try {
-                // 3 à la fois ; les noms déjà connus sont instantanés (cache), on n'attend que les nouveaux
                 val gate = kotlinx.coroutines.sync.Semaphore(3)
-                works.filter { it.site == "AO3" && (it.cover.isBlank() || "anilist" in it.cover || "myanimelist" in it.cover) }.map { w -> async { gate.withPermit {
-                    runCatching { Art.montage(w) ?: Art.forWork(w) }.onFailure { fail++ }.getOrNull()?.let { url -> val i = works.indexOfFirst { it.id == w.id }; if (i >= 0 && works[i].cover != url) { works[i] = works[i].copy(cover = url); changed++ } }
-                    done++; if (done % 10 == 0) persist(); artLog = "en cours : $done/$todo · $changed changées · ${(System.currentTimeMillis() - t0) / 1000} s"
+                todoList.map { w -> async { gate.withPermit {
+                    // Calcul (images, scores) hors du fil de l'interface : l'app reste fluide
+                    withContext(Dispatchers.Default) { runCatching { Art.montage(w) ?: Art.forWork(w) } }.onFailure { fail++ }.getOrNull()?.let { pending[w.id] = it }
+                    doneIds += w.id; done++
+                    if (done % 10 == 0) apply()
+                    artLog = "en cours : $done/$todo · $changed changées · ${(System.currentTimeMillis() - t0) / 1000} s"
                 } } }.awaitAll()
-                persist()
-            } finally { arting = false; artLog = "dernier passage : $done histoires traitées, $changed couvertures changées, $fail erreurs, ${(System.currentTimeMillis() - t0) / 1000} s" }
+                apply()
+            } finally { arting = false; if (todo > 0) artLog = "dernier passage : $done histoires traitées, $changed couvertures changées, $fail erreurs, ${(System.currentTimeMillis() - t0) / 1000} s" }
         }
     }
 

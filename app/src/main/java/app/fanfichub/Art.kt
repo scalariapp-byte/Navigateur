@@ -90,6 +90,7 @@ object Art {
         return out.orEmpty()
     }
 
+    private val rx = java.util.concurrent.ConcurrentHashMap<String, Regex>()
     private val STOP = setOf("the", "and", "von", "van", "der", "del", "les", "des")
     private fun tokens(n: String) = n.lowercase().split(Regex("[^\\p{L}]+")).filter { it.length > 2 && it !in STOP }
     private val ALIAS = mapOf("asl" to listOf("ace", "sabo", "luffy"))
@@ -103,7 +104,7 @@ object Art {
     private fun scored(w: Work, cands: List<Triple<String, String, Int>>): List<Pair<Triple<String, String, Int>, Double>> {
         val title = w.title.lowercase(); val sum = w.summary.lowercase()
         val aliasHits = ALIAS.filterKeys { Regex("\\b$it\\b").containsMatchIn(title) }.values.flatten().toSet()
-        fun count(text: String, t: String) = Regex("\\b${Regex.escape(t)}\\b").findAll(text).count()
+        fun count(text: String, t: String) = rx.getOrPut(t) { Regex("\\b${Regex.escape(t)}\\b") }.findAll(text).count()
         return cands.map { c ->
             val tk = tokens(c.first); var sc = 0.0
             if (tk.isEmpty()) return@map c to 0.0
