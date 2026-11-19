@@ -277,7 +277,7 @@ fun SitePicker(hub: Hub) {
 /** Sélecteur de site toujours visible en haut. */
 @Composable
 fun SiteChips(hub: Hub) {
-    val counts = remember(hub.works.size, hub.syncing) { hub.works.groupingBy { it.site }.eachCount() }
+    val counts = remember(hub.works.size, hub.syncing, hub.hidden.size) { hub.works.filter { it.id !in hub.hidden }.groupingBy { it.site }.eachCount() }
     Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         // Plus de « Tous » : on reste toujours sur un site (le plus fourni par défaut)
         LaunchedEffect(hub.site) { if (hub.site == "ALL") hub.pickSite(SITE_UI.maxByOrNull { counts[it.name] ?: 0 }?.name ?: "AO3") }
@@ -481,6 +481,17 @@ fun Library(hub: Hub) {
                     Text("BIBLIOTHÈQUE", style = TextStyle(brush = Grad, fontSize = 13.sp, fontWeight = FontWeight.Black, letterSpacing = 3.sp))
                     Text(col?.let { collectionName(it) } ?: if (site == "ALL") "Tout" else site, color = Txt, fontSize = 30.sp, fontWeight = FontWeight.Bold,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    // Nombre de fics du site : chaque histoire comptée une fois, même si elle est dans plusieurs listes
+                    val stats = remember(visible.size, site) {
+                        val unique = visible.distinctBy { it.title.lowercase().trim() + "|" + it.author.lowercase().trim() }.size
+                        val inLists = visible.sumOf { w -> w.sources.count { it != "Recherche" }.coerceAtLeast(1) }
+                        Triple(visible.size, unique, inLists)
+                    }
+                    Text(buildString {
+                        append("${fmtFull(stats.second)} fics")
+                        if (stats.third > stats.second) append(" · ${fmtFull(stats.third)} dans les listes, ${fmtFull(stats.third - stats.second)} doublons retirés")
+                        else if (stats.first > stats.second) append(" · ${fmtFull(stats.first - stats.second)} doublons retirés")
+                    }, color = Mut, fontSize = 13.sp, maxLines = 2)
                 }
                 // Tri : bouton discret, les choix s'ouvrent au toucher
                 if (!selecting) Box {
@@ -971,3 +982,6 @@ fun ExtensionsScreen(hub: Hub) {
         }
     }
 }
+
+/** 1744 → « 1 744 » (séparateur des milliers). */
+fun fmtFull(n: Int) = "%,d".format(n).replace(',', '\u202F')
