@@ -30,7 +30,7 @@ sealed interface Screen {
     data class Login(val site: String) : Screen
     data class Detail(val id: String) : Screen
     data class Reader(val id: String) : Screen
-    data class Web(val url: String, val title: String, val reader: Boolean = true) : Screen
+    data class Web(val url: String, val title: String, val reader: Boolean = true, val readOf: String = "") : Screen
     data class Setup(val site: String) : Screen
     data object Extensions : Screen
 }
@@ -126,6 +126,19 @@ class Hub(ctx: Context) {
     }
 
     fun push(s: Screen) { stack += s }
+    /** Lire : reprend au dernier chapitre ouvert, sinon ouvre directement le 1er chapitre (jamais la page de présentation). */
+    fun read(w: Work) { scope.launch {
+        val last = prefs.getString("last:" + w.link, null)
+        val u = last ?: when (w.site) {
+            "Wattpad" -> Wattpad.firstPart(w.link)
+            "Spirit Fanfics" -> Spirit.firstChapter(w.link)
+            "FanFiction.net" -> Regex("/s/(\\d+)").find(w.link)?.let { "https://www.fanfiction.net/s/${it.groupValues[1]}/1" }
+            else -> null
+        } ?: w.link
+        push(Screen.Web(u, w.title, readOf = w.link))
+    } }
+    /** Mémorise le chapitre en cours d'une histoire (pour reprendre au bon endroit). */
+    fun rememberChapter(of: String, url: String) { if (of.isNotBlank() && url.startsWith("http")) prefs.edit().putString("last:$of", url).apply() }
     fun pop() { if (stack.size > 1) stack.removeAt(stack.lastIndex) }
     fun work(id: String) = works.firstOrNull { it.id == id } ?: results.firstOrNull { it.id == id }
     fun inLibrary(id: String) = works.any { it.id == id }

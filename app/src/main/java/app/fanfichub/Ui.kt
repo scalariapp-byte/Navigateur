@@ -110,7 +110,7 @@ fun HubApp(hub: Hub) {
                     is Screen.Detail -> Detail(hub, s.id)
                     is Screen.Reader -> Reader(hub, s.id)
                     is Screen.Setup -> Setup(hub, s.site)
-                    is Screen.Web -> WebScreen(hub, s.url, s.title, s.reader)
+                    is Screen.Web -> WebScreen(hub, s.url, s.title, s.reader, s.readOf)
                     is Screen.Extensions -> ExtensionsScreen(hub)
                 }
             }
@@ -406,7 +406,7 @@ fun Feed(hub: Hub) {
         last?.let { w -> item {
             val c = fandomColor(w.fandom)
             Row(Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp).fillMaxWidth().clip(RoundedCornerShape(26.dp))
-                .background(Brush.linearGradient(listOf(c.copy(alpha = 0.55f), Surf, Surf))).clickable { hub.push(Screen.Web(w.link, w.title)) }.padding(16.dp),
+                .background(Brush.linearGradient(listOf(c.copy(alpha = 0.55f), Surf, Surf))).clickable { hub.read(w) }.padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 Book3D(w, 92)
                 Column(Modifier.weight(1f).padding(start = 16.dp)) {
@@ -457,7 +457,7 @@ fun Feed(hub: Hub) {
             item { Section("Reprendre la lecture") }
             item {
                 LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    items(more, key = { "r" + it.id }) { w -> Book3D(w, 100, Modifier.clickable { hub.push(Screen.Web(w.link, w.title)) }) }
+                    items(more, key = { "r" + it.id }) { w -> Book3D(w, 100, Modifier.clickable { hub.read(w) }) }
                 }
             }
         }
@@ -962,8 +962,7 @@ fun Detail(hub: Hub, id: String) {
             item {
                 Column(Modifier.padding(horizontal = 20.dp)) {
                     GradButton("Lire") {
-                        if (w.site == "Wattpad") hub.scope.launch { hub.push(Screen.Web(Wattpad.firstPart(w.link) ?: w.link, w.title)) }
-                        else hub.push(Screen.Web(w.link, w.title))
+                        hub.read(w)
                     }
                     if (!hub.inLibrary(id)) { Spacer(Modifier.height(10.dp)); GhostButton("+ Ajouter à ma bibliothèque") { hub.addToLibrary(w) } }
                     if (w.summary.isNotBlank()) {

@@ -132,7 +132,7 @@ FH.batch(JSON.stringify(a.map(function(x){return x.nodeValue})));})()"""
 /** Lecture sur le site, dans l'app, avec un navigateur qui se présente comme Chrome (session conservée). */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun WebScreen(hub: Hub, url: String, title: String, reader: Boolean = true) {
+fun WebScreen(hub: Hub, url: String, title: String, reader: Boolean = true, readOf: String = "") {
     val ctx = LocalContext.current
     var web by remember { mutableStateOf<WebView?>(null) }
     var progress by remember { mutableIntStateOf(0) }
@@ -205,7 +205,7 @@ fun WebScreen(hub: Hub, url: String, title: String, reader: Boolean = true) {
                 if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) WebSettingsCompat.setAlgorithmicDarkeningAllowed(settings, true)
                 webViewClient = object : WebViewClient() {
                     override fun shouldOverrideUrlLoading(v: WebView, r: WebResourceRequest) = !r.url.scheme.orEmpty().startsWith("http")
-                    override fun doUpdateVisitedHistory(v: WebView, u: String?, reload: Boolean) { canBack = v.canGoBack(); v.evaluateJavascript(readJs(hub, reader), null) }
+                    override fun doUpdateVisitedHistory(v: WebView, u: String?, reload: Boolean) { canBack = v.canGoBack(); if (u != null && u.substringBefore('#').trimEnd('/') != readOf.trimEnd('/')) hub.rememberChapter(readOf, u.substringBefore('#')); v.evaluateJavascript(readJs(hub, reader), null) }
                     // Pubs et traqueurs bloqués : pages bien plus rapides
                     override fun shouldInterceptRequest(v: WebView, r: WebResourceRequest): android.webkit.WebResourceResponse? {
                         val h = r.url.host.orEmpty()

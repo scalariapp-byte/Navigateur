@@ -653,6 +653,14 @@ object Spirit : Site {
     private const val B = "https://www.spiritfanfiction.com"
     override fun owns(url: String) = "spiritfanfics.com" in url || "spiritfanfiction.com" in url
     private fun slug(url: String) = Regex("/historia/([a-z0-9-]+-\\d+)").find(url)?.groupValues?.get(1)
+    /** Adresse du 1er chapitre (on saute la page de présentation de l'histoire). */
+    suspend fun firstChapter(url: String): String? = runCatching {
+        val s = Regex("/historia/([^/?#]+)").find(url)?.groupValues?.get(1) ?: return null
+        if (Regex("/historia/[^/?#]+/[^/?#]+").containsMatchIn(url)) return url // déjà un chapitre
+        chapters(Web.html("$B/historia/$s", "ui"), s).map { it.first }
+            .firstOrNull { !Regex("coment|review|avis|favorit|denunci|capitulos$|lista|recomend", RegexOption.IGNORE_CASE).containsMatchIn(it) }
+    }.getOrNull()
+
     private fun chapters(d: Document, s: String) =
         d.select("a[href*=/historia/$s/]").filter { Regex("/historia/$s/[^/?#]+").containsMatchIn(it.attr("href")) && it.text().isNotBlank() }
             .map { it.absUrl("href").substringBefore('#') to it.text() }.distinctBy { it.first }
