@@ -32,9 +32,11 @@ object Art {
                 .header("Content-Type", "application/json").header("Accept", "application/json")
                 .method(org.jsoup.Connection.Method.POST).timeout(15000).execute()
             // 429 (trop de requêtes) ou panne = échec à réessayer ; 404 = « introuvable », réponse valable
+            lastAni = "HTTP ${r.statusCode()}"
             if (r.statusCode() == 429 || r.statusCode() >= 500) null else JSONObject(r.body()).optJSONObject("data") ?: JSONObject()
-        }.getOrNull()
+        }.onFailure { lastAni = "ERREUR ${it.javaClass.simpleName} ${it.message?.take(80)}" }.getOrNull()
     } }
+    @Volatile var lastAni = "aucune requête"; @Volatile var lastJikan = "aucune requête"
 
     private suspend fun character(name: String): String? {
         val key = "c2:" + name.lowercase()
@@ -72,7 +74,7 @@ object Art {
         val key = "J:" + name.lowercase()
         prefs.getString(key, null)?.let { s -> return s.split('\n').filter { it.isNotBlank() } }
         val out = jikanGate.withLock { withContext(Dispatchers.IO) { runCatching {
-            fun get(u: String) = JSONObject(Jsoup.connect(u).ignoreContentType(true).timeout(15000).execute().body())
+            fun get(u: String) = JSONObject(Jsoup.connect(u).ignoreContentType(true).timeout(15000).execute().also { lastJikan = "HTTP ${it.statusCode()}" }.body())
             kotlinx.coroutines.delay(400) // limite de Jikan : 3 requêtes/s
             val c = get("https://api.jikan.moe/v4/characters?limit=1&order_by=favorites&sort=desc&q=" + java.net.URLEncoder.encode(name, "UTF-8"))
                 .optJSONArray("data")?.optJSONObject(0) ?: return@runCatching emptyList<String>()
@@ -81,7 +83,7 @@ object Art {
             kotlinx.coroutines.delay(400)
             val a = get("https://api.jikan.moe/v4/characters/${c.optInt("mal_id")}/pictures").optJSONArray("data") ?: return@runCatching emptyList<String>()
             (0 until a.length()).mapNotNull { a.getJSONObject(it).optJSONObject("jpg")?.optString("image_url")?.takeIf { u -> u.isNotBlank() } }.take(10)
-        }.getOrNull() } }
+        }.onFailure { lastJikan = "ERREUR ${it.javaClass.simpleName} ${it.message?.take(80)}" }.getOrNull() } }
         if (out != null) prefs.edit().putString(key, out.joinToString("\n")).apply()
         return out.orEmpty()
     }
@@ -95,7 +97,8 @@ object Art {
      * l'œuvre selon sa présence dans le titre (fort), le résumé, les tags de personnages (ordre AO3 = importance) et
      * les tags libres (« Protective Luffy »…).
      */
-    private fun rank(w: Work, cands: List<Triple<String, String, Int>>): List<Triple<String, String, Int>> {
+    private fun rank(w: Work, cands: List<Triple<String, String, Int>>) = scored(w, cands).map { it.first }
+    private fun scored(w: Work, cands: List<Triple<String, String, Int>>): List<Pair<Triple<String, String, Int>, Double>> {
         val title = w.title.lowercase(); val sum = w.summary.lowercase()
         val aliasHits = ALIAS.filterKeys { Regex("\\b$it\\b").containsMatchIn(title) }.values.flatten().toSet()
         fun count(text: String, t: String) = Regex("\\b${Regex.escape(t)}\\b").findAll(text).count()
@@ -108,7 +111,7 @@ object Art {
             w.tags.forEachIndexed { i, t -> val tl = t.lowercase()
                 if (tk.any { count(tl, it) > 0 }) sc += if (i < 6 && !Regex("[/&]").containsMatchIn(t) && tokens(t).all { x -> tk.any { it == x } || x.length < 4 }) 4.0 - i * 0.5 else 1.5 }
             c to sc
-        }.filter { it.second > 0 }.sortedByDescending { it.second }.map { it.first }
+        }.filter { it.second > 0 }.sortedByDescending { it.second }
     }
 
     /**
@@ -172,6 +175,25 @@ object Art {
         if (pics.size < 2) fs.firstOrNull()?.let { pickFrom(media(it).drop(1).map { p -> p.second }, h / 7 + 3) }?.let { pics += it }
         used += pics
         return when { pics.size >= 2 -> "montage:" + pics.take(2).joinToString("|"); pics.size == 1 -> pics[0]; else -> null }
+    }
+
+    /** Diagnostic : comment la couverture d'une histoire est choisie, étape par étape. */
+    suspend fun explain(w: Work): String {
+        val r = StringBuilder("  « ${w.title.take(50)} » · couverture actuelle ${w.cover.take(90)}\n")
+        val fs = fandomKey(w).removePrefix("Crossover : ").split(" × ").map { it.trim() }.filter { it.isNotBlank() && it != "Sans fandom" }
+        r.append("    fandoms détectés : ${fs.joinToString(" | ").ifEmpty { "aucun" }} · tags : ${w.tags.take(6).joinToString(", ").take(150)}\n")
+        val cands = fs.flatMapIndexed { k, f -> media(f).also { r.append("    AniList « $f » : ${it.size} images (dernier appel $lastAni)\n") }.drop(1).map { Triple(it.first, it.second, k) } }
+        val sc = scored(w, cands).take(5)
+        if (sc.isEmpty()) r.append("    aucun personnage reconnu dans le titre/résumé/tags\n")
+        for ((c, v) in sc) {
+            val ok = good(c.second)
+            r.append("    • ${c.first} (score ${"%.1f".format(v)}) image ${if (ok) "OK" else "rejetée"}${if (c.second in used) " · déjà utilisée" else ""}")
+            if (!ok || c.second in used) { val p = pictures(c.first); r.append(" · galerie ${p.size} images (Jikan $lastJikan), bonnes ${p.take(4).count { good(it) }}/${minOf(4, p.size)}") }
+            r.append('\n')
+        }
+        val m = runCatching { montage(w) }.getOrElse { r.append("    ! ${it.message}\n"); null }
+        r.append("    résultat : ${m?.take(120) ?: "rien (couverture inchangée)"}\n")
+        return r.toString()
     }
 
     /** Image pour une fiche : personnage (tags en tête = personnages sur AO3), sinon l'œuvre du fandom. */

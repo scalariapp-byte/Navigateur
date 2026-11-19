@@ -245,6 +245,11 @@ class Hub(ctx: Context) {
         log("  traduction : " + runCatching { Translator.texts(listOf("Hello, the pirate king is here.")).first() }.fold({ "« $it » (${System.currentTimeMillis() - t1} ms)" }, { "ERREUR ${it.message}" }))
         val t2 = System.currentTimeMillis()
         log("  image de couverture : " + (works.firstOrNull { goodCover(it.cover) }?.let { w -> runCatching { Img.load(w.cover) }.getOrNull()?.let { "chargée (${it.width}×${it.height}, ${System.currentTimeMillis() - t2} ms)" } ?: "échec ${w.cover.take(60)}" } ?: "aucune"))
+        log("\n== Couvertures AO3 illustrées")
+        log("  ${if (arting) "calcul en cours · " else ""}$artLog")
+        works.filter { it.site == "AO3" }.let { a -> log("  ${a.size} fiches · montage ${a.count { it.cover.startsWith("montage:") }} · image seule ${a.count { it.cover.isNotBlank() && !it.cover.startsWith("montage:") }} · vides ${a.count { it.cover.isBlank() }}") }
+        works.filter { it.site == "AO3" }.sortedByDescending { if ("luffy" in it.title.lowercase()) 1 else 0 }.take(2).forEach { w ->
+            kotlinx.coroutines.withTimeoutOrNull(90_000) { runCatching { Art.explain(w) }.getOrElse { "  ! ${it.message}\n" } }?.let { out.append(it) } ?: log("  ! délai dépassé pour ${w.title.take(40)} (AniList ${Art.lastAni})") }
         log("  réglages : traduction auto ${autoTr} · thème ${theme} · taille ${size} · animation ${bookAnim}")
         java.io.File(app.filesDir, "crash.txt").takeIf { it.exists() }?.let { log("  DERNIER PLANTAGE :\n" + it.readText().take(600)) } ?: log("  aucun plantage enregistré")
         diagRunning = false
@@ -542,18 +547,22 @@ class Hub(ctx: Context) {
     /** Couvertures préchargées en arrière-plan : les étagères s'affichent sans attendre. */
     /** Couvertures illustrées (AniList) pour les fiches AO3 sans image ; 2 requêtes par seconde au plus. */
     private var arting = false
+    private var artLog = "jamais lancé"
     fun fillArt() {
         if (arting) return; arting = true
         Art.used.clear()
         scope.launch {
+            val t0 = System.currentTimeMillis(); var done = 0; var changed = 0; var fail = 0
+            artLog = "en cours"
             try {
                 // 3 à la fois ; les noms déjà connus sont instantanés (cache), on n'attend que les nouveaux
                 val gate = kotlinx.coroutines.sync.Semaphore(3)
                 works.filter { it.site == "AO3" && (it.cover.isBlank() || "anilist" in it.cover || "myanimelist" in it.cover) }.map { w -> async { gate.withPermit {
-                    runCatching { Art.montage(w) ?: Art.forWork(w) }.getOrNull()?.let { url -> val i = works.indexOfFirst { it.id == w.id }; if (i >= 0 && works[i].cover != url) works[i] = works[i].copy(cover = url) }
+                    runCatching { Art.montage(w) ?: Art.forWork(w) }.onFailure { fail++ }.getOrNull()?.let { url -> val i = works.indexOfFirst { it.id == w.id }; if (i >= 0 && works[i].cover != url) { works[i] = works[i].copy(cover = url); changed++ } }
+                    done++
                 } } }.awaitAll()
                 persist()
-            } finally { arting = false }
+            } finally { arting = false; artLog = "dernier passage : $done histoires traitées, $changed couvertures changées, $fail erreurs, ${(System.currentTimeMillis() - t0) / 1000} s" }
         }
     }
 
