@@ -142,14 +142,18 @@ private fun Montage(w: Work, width: Int) {
     val flip = (w.id.hashCode() and 1) == 1 // mise en page miroir une fois sur deux
     Box(Modifier.fillMaxSize().background(Color(0xFF0B0B10))) {
         // Deux personnages côte à côte, séparés par une diagonale nette ; visages cadrés en haut
-        urls.getOrNull(0)?.let { NetFill(it, alignment = Alignment.TopCenter) }
+        // Chaque image remplit SA moitié (et non toute la couverture) : le visage, centré dans l'image, reste entier
+        if (urls.size < 2) urls.getOrNull(0)?.let { NetFill(it, alignment = Alignment.TopCenter) }
+        else Box(Modifier.fillMaxHeight().fillMaxWidth(0.6f).align(if (flip) Alignment.CenterEnd else Alignment.CenterStart)) { NetFill(urls[0], alignment = Alignment.TopCenter) }
         urls.getOrNull(1)?.let { u ->
             val half = androidx.compose.foundation.shape.GenericShape { sz, _ ->
                 if (flip) { moveTo(0f, 0f); lineTo(sz.width * 0.42f, 0f); lineTo(sz.width * 0.58f, sz.height); lineTo(0f, sz.height) }
                 else { moveTo(sz.width * 0.58f, 0f); lineTo(sz.width, 0f); lineTo(sz.width, sz.height); lineTo(sz.width * 0.42f, sz.height) }
                 close()
             }
-            Box(Modifier.fillMaxSize().clip(half)) { NetFill(u, alignment = Alignment.TopCenter) }
+            Box(Modifier.fillMaxSize().clip(half)) {
+                Box(Modifier.fillMaxHeight().fillMaxWidth(0.6f).align(if (flip) Alignment.CenterStart else Alignment.CenterEnd)) { NetFill(u, alignment = Alignment.TopCenter) }
+            }
             androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
                 val a = if (flip) androidx.compose.ui.geometry.Offset(size.width * 0.42f, 0f) else androidx.compose.ui.geometry.Offset(size.width * 0.58f, 0f)
                 val b = if (flip) androidx.compose.ui.geometry.Offset(size.width * 0.58f, size.height) else androidx.compose.ui.geometry.Offset(size.width * 0.42f, size.height)

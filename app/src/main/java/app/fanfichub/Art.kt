@@ -58,6 +58,8 @@ object Art {
         val ok = runCatching {
             val b = Img.load(url)?.asAndroidBitmap() ?: return@runCatching false
             if (b.width < 100 || b.height < 120) return@runCatching false
+            // Portrait obligatoire : les images couchées ou en bandeau coupent les têtes dans une demi-couverture
+            if (b.height < b.width * 1.05f) return@runCatching false
             var sum = 0.0; var sq = 0.0; var n = 0
             for (y in 0 until 16) for (x in 0 until 16) {
                 val p = b.getPixel(x * (b.width - 1) / 15, (y * (b.height - 1) / 15))
