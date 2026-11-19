@@ -170,10 +170,15 @@ fun crossName(t: String) = Regex("(?i)crossover|×").containsMatchIn(t) ||
 /** Crossover : plusieurs fandoms (site, tags, titre, résumé) ou titre annonçant un crossover. */
 fun isCrossover(w: Work) = fandomKey(w).startsWith("Crossover") || crossName(w.title) ||
     fandomsIn(w.title + " " + w.tags.joinToString(" ") + " " + w.fandoms.joinToString(" ") + " " + w.summary.take(300)).size >= 2
+// Caches : chaque fiche n'est analysée qu'une fois (tri instantané même avec 1 700 fiches)
+private val crossCache = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+private val dateCache = java.util.concurrent.ConcurrentHashMap<String, Int>()
+fun crossOf(w: Work) = crossCache.getOrPut(w.id + "|" + w.title) { isCrossover(w) }
+fun dateOf(w: Work) = dateCache.getOrPut(w.updated) { dateKey(w) }
 fun sortWorks(l: List<Work>, mode: Int): List<Work> = when (mode) {
     0 -> l.sortedBy { it.title.lowercase() }
-    2 -> l.sortedWith(compareByDescending<Work> { isCrossover(it) }.thenBy { it.title.lowercase() })
-    else -> l.sortedWith(compareByDescending<Work> { dateKey(it) }.thenByDescending { it.checked })
+    2 -> l.map { Triple(it, crossOf(it), it.title.lowercase()) }.sortedWith(compareByDescending<Triple<Work, Boolean, String>> { it.second }.thenBy { it.third }).map { it.first }
+    else -> l.map { it to dateOf(it) }.sortedWith(compareByDescending<Pair<Work, Int>> { it.second }.thenByDescending { it.first.checked }).map { it.first }
 }
 
 /** Coche de sélection posée sur un livre ou une fiche. */

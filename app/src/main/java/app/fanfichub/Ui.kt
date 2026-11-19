@@ -435,7 +435,8 @@ fun Library(hub: Hub) {
     val filters = listOf("Tout", "En cours", "Nouveautés", "Terminées", "Hors ligne")
     val site = hub.site ?: "ALL"
     // Calculs mémorisés : ne se refont que si les données ou les filtres changent.
-    val visible = remember(hub.works.size, hub.syncing, site, hub.stack.size, hub.hidden.size) { hub.visible() }
+    // Recalcul seulement si les données changent (plus à chaque retour d'une fiche)
+    val visible = remember(hub.works.size, hub.syncing, site, hub.hidden.size) { hub.visible() }
     var selecting by remember { mutableStateOf(false) }
     val sel = remember { mutableStateListOf<String>() }
     fun open(w: Work) { if (selecting) { if (w.id in sel) sel.remove(w.id) else sel.add(w.id) } else hub.push(Screen.Detail(w.id)) }
@@ -449,11 +450,11 @@ fun Library(hub: Hub) {
         when (hub.sortMode) {
             0 -> shelves0.sortedBy { collectionName(it.first).lowercase() }
             2 -> shelves0.sortedWith(compareByDescending<Pair<String, List<Work>>> { crossName(collectionName(it.first)) }
-                .thenByDescending { p -> p.second.count { isCrossover(it) } * 1f / p.second.size }.thenByDescending { it.second.size })
-            else -> shelves0.sortedByDescending { p -> p.second.maxOfOrNull { dateKey(it) } ?: 0 }
+                .thenByDescending { p -> p.second.count { crossOf(it) } * 1f / p.second.size }.thenByDescending { it.second.size })
+            else -> shelves0.sortedByDescending { p -> p.second.maxOfOrNull { dateOf(it) } ?: 0 }
         }.let { l ->
             fun key(n: String) = collectionName(n).lowercase().replace(Regex("[^a-z]"), "")
-            l.groupBy { key(it.first) }.values.flatten()
+            l.groupBy { key(it.first) }.values.flatten().map { (k, v) -> k to sortWorks(v, hub.sortMode) } // étagères déjà triées
         }
     }
 
@@ -533,7 +534,7 @@ fun Library(hub: Hub) {
             item { Spacer(Modifier.height(16.dp)) }
             if (shelves.isEmpty()) item { Empty("Vide. Configure un compte.") }
             items(shelves, key = { it.first }) { (k, v) ->
-                BookShelf(if (site == "ALL") k else collectionName(k), sortWorks(v, hub.sortMode), onAll = { col = k }, isSel = { it.id in sel }) { w -> open(w) }
+                BookShelf(if (site == "ALL") k else collectionName(k), v, onAll = { col = k }, isSel = { it.id in sel }) { w -> open(w) }
             }
         } else if (gridMode) {
             item { Spacer(Modifier.height(8.dp)) }
