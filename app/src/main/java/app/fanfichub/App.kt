@@ -258,14 +258,15 @@ class Hub(ctx: Context) {
         if (on("covers")) {
         log("\n== Couvertures")
         val t2 = System.currentTimeMillis()
-        log("  image de couverture : " + (works.firstOrNull { goodCover(it.cover) }?.let { w -> runCatching { Img.load(w.cover) }.getOrNull()?.let { "chargée (${it.width}×${it.height}, ${System.currentTimeMillis() - t2} ms)" } ?: "échec ${w.cover.take(60)}" } ?: "aucune"))
+        log("  image de couverture : " + (works.firstOrNull { goodCover(it.cover) && !it.cover.startsWith("montage:") }?.let { w -> kotlinx.coroutines.withTimeoutOrNull(8000) { runCatching { Img.load(w.cover) }.getOrNull() }?.let { "chargée (${it.width}×${it.height}, ${System.currentTimeMillis() - t2} ms)" } ?: "échec ${w.cover.take(60)}" } ?: "aucune"))
         Sites.all.map { it.name }.plus("AO3").distinct().forEach { n -> val m = works.filter { it.site == n }
             if (m.isNotEmpty()) log("  $n : ${m.size} fiches · couverture valable ${m.count { goodCover(it.cover) }} · vide ${m.count { it.cover.isBlank() }} · doublon ${m.count { it.cover.isNotBlank() && it.cover in dupCovers }}") }
         log("\n== Couvertures AO3 illustrées")
-        log("  ${if (arting) "calcul en cours · " else ""}$artLog")
+        log("  calcul : $artLog")
+        log("  réseau : ${Art.probe()}")
         works.filter { it.site == "AO3" }.let { a -> log("  ${a.size} fiches · montage ${a.count { it.cover.startsWith("montage:") }} · image seule ${a.count { it.cover.isNotBlank() && !it.cover.startsWith("montage:") }} · vides ${a.count { it.cover.isBlank() }}") }
-        works.filter { it.site == "AO3" }.sortedByDescending { (if ("luffy" in it.title.lowercase()) 2 else 0) + (if (isCrossover(it)) 1 else 0) }.take(if (kind == "covers") 5 else 2).forEach { w ->
-            kotlinx.coroutines.withTimeoutOrNull(90_000) { runCatching { Art.explain(w) }.getOrElse { "  ! ${it.message}\n" } }?.let { out.append(it) } ?: log("  ! délai dépassé pour ${w.title.take(40)} (AniList ${Art.lastAni})") }
+        works.filter { it.site == "AO3" }.sortedByDescending { (if ("luffy" in it.title.lowercase()) 2 else 0) + (if (isCrossover(it)) 1 else 0) }.take(if (kind == "covers") 8 else 3).forEach { w ->
+            out.append(runCatching { Art.explain(w) }.getOrElse { "  ! ${it.message}\n" }) }
         }
         if (on("app")) java.io.File(app.filesDir, "crash.txt").takeIf { it.exists() }?.let { log("  DERNIER PLANTAGE :\n" + it.readText().take(600)) } ?: log("  aucun plantage enregistré")
         diagRunning = false
@@ -569,13 +570,14 @@ class Hub(ctx: Context) {
         Art.used.clear()
         scope.launch {
             val t0 = System.currentTimeMillis(); var done = 0; var changed = 0; var fail = 0
-            artLog = "en cours"
+            val todo = works.count { it.site == "AO3" && (it.cover.isBlank() || "anilist" in it.cover || "myanimelist" in it.cover) }
+            artLog = "en cours : 0/$todo"
             try {
                 // 3 à la fois ; les noms déjà connus sont instantanés (cache), on n'attend que les nouveaux
                 val gate = kotlinx.coroutines.sync.Semaphore(3)
                 works.filter { it.site == "AO3" && (it.cover.isBlank() || "anilist" in it.cover || "myanimelist" in it.cover) }.map { w -> async { gate.withPermit {
                     runCatching { Art.montage(w) ?: Art.forWork(w) }.onFailure { fail++ }.getOrNull()?.let { url -> val i = works.indexOfFirst { it.id == w.id }; if (i >= 0 && works[i].cover != url) { works[i] = works[i].copy(cover = url); changed++ } }
-                    done++
+                    done++; artLog = "en cours : $done/$todo · $changed changées · ${(System.currentTimeMillis() - t0) / 1000} s"
                 } } }.awaitAll()
                 persist()
             } finally { arting = false; artLog = "dernier passage : $done histoires traitées, $changed couvertures changées, $fail erreurs, ${(System.currentTimeMillis() - t0) / 1000} s" }

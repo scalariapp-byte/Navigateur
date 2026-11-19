@@ -177,22 +177,34 @@ object Art {
         return when { pics.size >= 2 -> "montage:" + pics.take(2).joinToString("|"); pics.size == 1 -> pics[0]; else -> null }
     }
 
-    /** Diagnostic : comment la couverture d'une histoire est choisie, étape par étape. */
-    suspend fun explain(w: Work): String {
-        val r = StringBuilder("  « ${w.title.take(50)} » · couverture actuelle ${w.cover.take(90)}\n")
+    /** Test réseau rapide (hors file d'attente, sans nouvel essai) : statut et temps de réponse d'AniList et de Jikan. */
+    suspend fun probe(): String = withContext(Dispatchers.IO) {
+        fun t(name: String, f: () -> Int) = System.currentTimeMillis().let { t0 -> runCatching { "$name HTTP ${f()} (${System.currentTimeMillis() - t0} ms)" }.getOrElse { "$name ERREUR ${it.javaClass.simpleName} ${it.message?.take(60)}" } }
+        val body = JSONObject().put("query", "{Media(search:\"One Piece\",type:ANIME){id}}").toString()
+        t("AniList") { Jsoup.connect("https://graphql.anilist.co").ignoreContentType(true).ignoreHttpErrors(true).requestBody(body)
+            .header("Content-Type", "application/json").method(org.jsoup.Connection.Method.POST).timeout(8000).execute().statusCode() } + " · " +
+        t("Jikan") { Jsoup.connect("https://api.jikan.moe/v4/characters?limit=1&q=Luffy").ignoreContentType(true).ignoreHttpErrors(true).timeout(8000).execute().statusCode() } +
+        " · dernier appel AniList de l'app : $lastAni · Jikan : $lastJikan"
+    }
+
+    /** Diagnostic instantané d'une histoire, uniquement à partir du cache (aucune requête) : ce que l'app sait et a décidé. */
+    fun explain(w: Work): String {
+        val r = StringBuilder("  « ${w.title.take(50)} »\n    couverture : ${w.cover.ifBlank { "aucune" }.take(110)}\n")
         val fs = fandomKey(w).removePrefix("Crossover : ").split(" × ").map { it.trim() }.filter { it.isNotBlank() && it != "Sans fandom" }
-        r.append("    fandoms détectés : ${fs.joinToString(" | ").ifEmpty { "aucun" }} · tags : ${w.tags.take(6).joinToString(", ").take(150)}\n")
-        val cands = fs.flatMapIndexed { k, f -> media(f).also { r.append("    AniList « $f » : ${it.size} images (dernier appel $lastAni)\n") }.drop(1).map { Triple(it.first, it.second, k) } }
-        val sc = scored(w, cands).take(5)
-        if (sc.isEmpty()) r.append("    aucun personnage reconnu dans le titre/résumé/tags\n")
-        for ((c, v) in sc) {
-            val ok = good(c.second)
-            r.append("    • ${c.first} (score ${"%.1f".format(v)}) image ${if (ok) "OK" else "rejetée"}${if (c.second in used) " · déjà utilisée" else ""}")
-            if (!ok || c.second in used) { val p = pictures(c.first); r.append(" · galerie ${p.size} images (Jikan $lastJikan), bonnes ${p.take(4).count { good(it) }}/${minOf(4, p.size)}") }
-            r.append('\n')
+        r.append("    fandoms : ${fs.joinToString(" | ").ifEmpty { "aucun" }} · tags : ${w.tags.take(6).joinToString(", ").take(140)}\n")
+        val cands = fs.flatMapIndexed { k, f ->
+            val m = mem["M3:" + f.lowercase()] ?: prefs.getString("M3:" + f.lowercase(), null)?.split('\n')?.filter { '\t' in it }?.map { it.substringBefore('\t') to it.substringAfter('\t') }
+            r.append("    AniList « $f » : ${m?.let { "${it.size} images en cache" } ?: "PAS ENCORE CHARGÉ"}\n")
+            m.orEmpty().drop(1).map { Triple(it.first, it.second, k) }
         }
-        val m = runCatching { montage(w) }.getOrElse { r.append("    ! ${it.message}\n"); null }
-        r.append("    résultat : ${m?.take(120) ?: "rien (couverture inchangée)"}\n")
+        val sc = scored(w, cands).take(5)
+        if (cands.isNotEmpty() && sc.isEmpty()) r.append("    aucun personnage reconnu dans titre/résumé/tags → personnages populaires\n")
+        fun q(u: String) = if (!prefs.contains("q2:$u")) "non testée" else if (prefs.getBoolean("q2:$u", false)) "OK" else "rejetée"
+        for ((c, v) in sc) {
+            val gal = prefs.getString("J:" + c.first.lowercase(), null)?.split('\n')?.filter { it.isNotBlank() }
+            val onCover = w.cover.contains(c.second) || gal.orEmpty().any { w.cover.contains(it) }
+            r.append("    • ${c.first} · score ${"%.1f".format(v)} · image ${q(c.second)} · galerie ${gal?.let { "${it.size} (OK ${it.count { u -> q(u) == "OK" }})" } ?: "non chargée"}${if (onCover) " · SUR LA COUVERTURE" else ""}\n")
+        }
         return r.toString()
     }
 
