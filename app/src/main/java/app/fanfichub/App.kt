@@ -549,7 +549,7 @@ class Hub(ctx: Context) {
             try {
                 // 3 à la fois ; les noms déjà connus sont instantanés (cache), on n'attend que les nouveaux
                 val gate = kotlinx.coroutines.sync.Semaphore(3)
-                works.filter { it.site == "AO3" && (it.cover.isBlank() || "anilist" in it.cover) }.map { w -> async { gate.withPermit {
+                works.filter { it.site == "AO3" && (it.cover.isBlank() || "anilist" in it.cover || "myanimelist" in it.cover) }.map { w -> async { gate.withPermit {
                     runCatching { Art.montage(w) ?: Art.forWork(w) }.getOrNull()?.let { url -> val i = works.indexOfFirst { it.id == w.id }; if (i >= 0 && works[i].cover != url) works[i] = works[i].copy(cover = url) }
                 } } }.awaitAll()
                 persist()
@@ -599,7 +599,7 @@ class MainActivity : ComponentActivity() {
         hub = Hub(this)
         handle(intent)
         setContent { HubApp(hub) }
-        runCatching { hub.prefetchCovers() }
+        runCatching { hub.prefetchCovers(); hub.fillArt() }
         BackgroundSync.schedule(this)
         if (android.os.Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED)
             requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)

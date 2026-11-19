@@ -16,19 +16,30 @@ object Art {
     private lateinit var prefs: android.content.SharedPreferences
     fun init(ctx: Context) { prefs = ctx.getSharedPreferences("art", Context.MODE_PRIVATE) }
 
-    private suspend fun gql(q: String, s: String): JSONObject? = withContext(Dispatchers.IO) {
+    // AniList limite le débit (≈30-90 requêtes/min) : requêtes espacées, nouvel essai en cas d'échec, échecs jamais mis en cache
+    private val gqlGate = kotlinx.coroutines.sync.Mutex()
+    private suspend fun gql(q: String, s: String): JSONObject? {
+        for (attempt in 0 until 3) {
+            gqlRaw(q, s)?.let { return it }
+            kotlinx.coroutines.delay(if (attempt == 0) 3000L else 15000L)
+        }
+        return null
+    }
+    private suspend fun gqlRaw(q: String, s: String): JSONObject? = gqlGate.withLock { kotlinx.coroutines.delay(700); withContext(Dispatchers.IO) {
         runCatching {
             val body = JSONObject().put("query", q).put("variables", JSONObject().put("s", s)).toString()
-            JSONObject(Jsoup.connect("https://graphql.anilist.co").ignoreContentType(true).requestBody(body)
+            val r = Jsoup.connect("https://graphql.anilist.co").ignoreContentType(true).ignoreHttpErrors(true).requestBody(body)
                 .header("Content-Type", "application/json").header("Accept", "application/json")
-                .method(org.jsoup.Connection.Method.POST).timeout(15000).execute().body()).optJSONObject("data")
+                .method(org.jsoup.Connection.Method.POST).timeout(15000).execute()
+            // 429 (trop de requêtes) ou panne = échec à réessayer ; 404 = « introuvable », réponse valable
+            if (r.statusCode() == 429 || r.statusCode() >= 500) null else JSONObject(r.body()).optJSONObject("data") ?: JSONObject()
         }.getOrNull()
-    }
+    } }
 
     private suspend fun character(name: String): String? {
-        val key = "c:" + name.lowercase()
+        val key = "c2:" + name.lowercase()
         prefs.getString(key, null)?.let { return it.ifBlank { null } }
-        val o = gql("query(\$s:String){Character(search:\$s){name{full} image{large}}}", name)?.optJSONObject("Character")
+        val o = (gql("query(\$s:String){Character(search:\$s){name{full} image{large}}}", name) ?: return null).optJSONObject("Character")
         val full = o?.optJSONObject("name")?.optString("full").orEmpty().lowercase()
         // On n'accepte que si le nom trouvé partage un mot du tag (évite les faux positifs)
         val ok = full.isNotBlank() && name.lowercase().split(Regex("[^\\p{L}]+")).any { it.length > 2 && full.contains(it) }
@@ -39,11 +50,11 @@ object Art {
     /** Œuvre : affiche (nom vide) + 25 personnages les plus populaires (nom, image). Une requête, mise en cache. */
     private val mem = HashMap<String, List<Pair<String, String>>>()
     private suspend fun media(name: String): List<Pair<String, String>> {
-        val key = "M2:" + name.lowercase()
+        val key = "M3:" + name.lowercase()
         mem[key]?.let { return it }
         fun parse(s: String) = s.split('\n').filter { '\t' in it }.map { it.substringBefore('\t') to it.substringAfter('\t') }
         prefs.getString(key, null)?.let { s -> return parse(s).also { mem[key] = it } }
-        val m = gql("query(\$s:String){Media(search:\$s,type:ANIME){coverImage{extraLarge} characters(sort:FAVOURITES_DESC,perPage:25){nodes{name{full} image{large}}}}}", name)?.optJSONObject("Media")
+        val m = gql("query(\$s:String){Media(search:\$s,type:ANIME){coverImage{extraLarge} characters(sort:FAVOURITES_DESC,perPage:25){nodes{name{full} image{large}}}}}", name)?.optJSONObject("Media") ?: return emptyList()
         val out = mutableListOf<Pair<String, String>>()
         m?.optJSONObject("coverImage")?.optString("extraLarge")?.takeIf { it.isNotBlank() }?.let { out += "" to it }
         m?.optJSONObject("characters")?.optJSONArray("nodes")?.let { a -> for (i in 0 until a.length()) { val n = a.getJSONObject(i)
