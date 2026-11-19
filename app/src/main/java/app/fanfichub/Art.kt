@@ -25,7 +25,7 @@ object Art {
         }
         return null
     }
-    private suspend fun gqlRaw(q: String, s: String): JSONObject? = gqlGate.withLock { kotlinx.coroutines.delay(700); withContext(Dispatchers.IO) {
+    private suspend fun gqlRaw(q: String, s: String): JSONObject? = gqlGate.withLock { kotlinx.coroutines.delay(2100); withContext(Dispatchers.IO) {
         runCatching {
             val body = JSONObject().put("query", q).put("variables", JSONObject().put("s", s)).toString()
             val r = Jsoup.connect("https://graphql.anilist.co").ignoreContentType(true).ignoreHttpErrors(true).requestBody(body)

@@ -577,7 +577,7 @@ class Hub(ctx: Context) {
                 val gate = kotlinx.coroutines.sync.Semaphore(3)
                 works.filter { it.site == "AO3" && (it.cover.isBlank() || "anilist" in it.cover || "myanimelist" in it.cover) }.map { w -> async { gate.withPermit {
                     runCatching { Art.montage(w) ?: Art.forWork(w) }.onFailure { fail++ }.getOrNull()?.let { url -> val i = works.indexOfFirst { it.id == w.id }; if (i >= 0 && works[i].cover != url) { works[i] = works[i].copy(cover = url); changed++ } }
-                    done++; artLog = "en cours : $done/$todo · $changed changées · ${(System.currentTimeMillis() - t0) / 1000} s"
+                    done++; if (done % 10 == 0) persist(); artLog = "en cours : $done/$todo · $changed changées · ${(System.currentTimeMillis() - t0) / 1000} s"
                 } } }.awaitAll()
                 persist()
             } finally { arting = false; artLog = "dernier passage : $done histoires traitées, $changed couvertures changées, $fail erreurs, ${(System.currentTimeMillis() - t0) / 1000} s" }
