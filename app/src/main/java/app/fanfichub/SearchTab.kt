@@ -96,11 +96,28 @@ fun SearchTab(hub: Hub) {
     val wpMode = q.site == "Wattpad" && q.wpLists
     var picking by remember { mutableStateOf<FormField?>(null) }
     var sugg by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
+    var tagInfo by remember { mutableStateOf<String?>(null) }
     val langs = listOf("" to "Toutes", "fr" to "Français", "en" to "Anglais", "es" to "Espagnol", "ptBR" to "Portugais")
     val ratings = listOf(0 to "Tous", 10 to "G", 11 to "T", 12 to "M", 13 to "E")
     val words = listOf(0, 10_000, 50_000, 100_000)
     fun go() { focus.clearFocus(); sugg = emptyList(); hub.runSearch() }
 
+    // Le texte tapé est-il un tag existant ? (référence : tags officiels d'AO3, valables pour tous les sites)
+    LaunchedEffect(q.text) {
+        tagInfo = null
+        val t = q.text.trim(); if (t.length < 2) return@LaunchedEffect
+        delay(450)
+        tagInfo = withContext(Dispatchers.IO) {
+            val kinds = listOf("freeform" to "Tag", "character" to "Personnage", "relationship" to "Relation", "fandom" to "Fandom")
+            val all = kinds.flatMap { (k, l) -> Ao3.autocomplete(k, t).map { l to it } }
+            val exact = all.firstOrNull { it.second.equals(t, true) || it.second.substringBefore(" (").equals(t, true) }
+            when {
+                exact != null -> "✓ ${exact.first} existant : ${exact.second}"
+                all.isNotEmpty() -> "Pas de tag exact « $t » · proche : " + all.take(3).joinToString(", ") { it.second }
+                else -> "✕ Aucun tag « $t »"
+            }
+        }
+    }
     // Suggestions AO3 pendant la frappe
     LaunchedEffect(q.text, q.site) {
         sugg = emptyList()
@@ -128,6 +145,10 @@ fun SearchTab(hub: Hub) {
                 if (q.text.isNotEmpty()) Icon(Icons.Default.Close, null, tint = Mut, modifier = Modifier.clickable { hub.query = q.copy(text = "") })
             }
         }
+        tagInfo?.let { info -> item {
+            Text(info, color = if (info.startsWith("✓")) Color(0xFF34D399) else if (info.startsWith("✕")) Color(0xFFEF4444) else Mut,
+                fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 24.dp, end = 20.dp, top = 8.dp))
+        } }
         item {
             Suggestions(sugg) { (kind, v) ->
                 hub.query = if (kind == "Fandom") q.copy(fandom = v, text = "") else q.copy(character = v, text = "")

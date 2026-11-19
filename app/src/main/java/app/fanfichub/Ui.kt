@@ -386,32 +386,104 @@ fun SiteStateCard(hub: Hub) {
 
 @Composable
 fun Feed(hub: Hub) {
-    val fresh = remember(hub.works.size, hub.syncing) { hub.works.filter { it.newChapters > 0 }.sortedByDescending { it.newChapters } }
-    val reading = remember(hub.works.size, hub.syncing) { hub.works.filter { it.progress > 0.01f && it.progress < 0.985f }.sortedByDescending { it.lastRead } }
+    val fresh = remember(hub.works.size, hub.syncing) { hub.works.filter { it.newChapters > 0 && it.id !in hub.hidden }.sortedByDescending { it.newChapters } }
+    val reading = remember(hub.works.size, hub.syncing) { hub.works.filter { it.progress > 0.01f && it.progress < 0.985f && it.id !in hub.hidden }.sortedByDescending { it.lastRead } }
+    val last = remember(hub.works.size, hub.syncing) { hub.works.filter { it.lastRead > 0 && it.id !in hub.hidden }.maxByOrNull { it.lastRead } }
+    val total = remember(hub.works.size, hub.hidden.size) { hub.works.asSequence().filter { it.id !in hub.hidden }.map { it.title.lowercase().trim() + "|" + it.author.lowercase().trim() }.distinct().count() }
+    // Suggestions du jour : histoires jamais ouvertes de ta bibliothèque (change chaque jour)
+    val day = Calendar.getInstance().get(Calendar.DAY_OF_YEAR)
+    val discover = remember(hub.works.size, day) { hub.works.filter { it.lastRead == 0L && it.progress == 0f && it.id !in hub.hidden }.shuffled(java.util.Random(day.toLong())).take(12) }
+    // Tes fandoms les plus lus (tous sites)
+    val fandoms = remember(hub.works.size) {
+        hub.works.filter { it.id !in hub.hidden }.groupBy { fandomKey(it).removePrefix("Crossover : ") }.filterKeys { it.isNotBlank() && it != "Sans fandom" }
+            .map { (k, v) -> Triple(k, v.size, v.groupingBy { it.site }.eachCount().maxByOrNull { it.value }?.key ?: "AO3") }.sortedByDescending { it.second }.take(8)
+    }
     val h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 120.dp)) {
         item { Title("FANFIC HUB", (if (h in 5..17) "Bonjour" else "Bonsoir") + (hub.user?.let { ", $it" } ?: "")) }
-        item { ShelfStrip(hub) }
         if (hub.newVersion != null) item { UpdateCard(hub) }
+        // Grande carte « Continuer » : la dernière histoire ouverte
+        last?.let { w -> item {
+            val c = fandomColor(w.fandom)
+            Row(Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp).fillMaxWidth().clip(RoundedCornerShape(26.dp))
+                .background(Brush.linearGradient(listOf(c.copy(alpha = 0.55f), Surf, Surf))).clickable { hub.push(Screen.Web(w.link, w.title)) }.padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Book3D(w, 92)
+                Column(Modifier.weight(1f).padding(start = 16.dp)) {
+                    Text("CONTINUER", color = Txt.copy(alpha = 0.7f), fontSize = 11.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
+                    Text(w.title, color = Txt, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
+                    Text(w.author, color = Mut, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Box(Modifier.padding(top = 10.dp).fillMaxWidth().height(5.dp).clip(CircleShape).background(Surf2)) {
+                        Box(Modifier.fillMaxWidth(w.progress.coerceIn(0.02f, 1f)).fillMaxHeight().background(Grad))
+                    }
+                    Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("▶  Reprendre", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                            modifier = Modifier.clip(CircleShape).background(Grad).padding(horizontal = 16.dp, vertical = 8.dp))
+                        Text("  ${(w.progress * 100).toInt()} %", color = Mut, fontSize = 13.sp)
+                    }
+                }
+            }
+        } }
+        // Chiffres clés
+        item {
+            Row(Modifier.padding(start = 20.dp, end = 20.dp, top = 14.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                listOf(fmtFull(total) to "fanfictions", "${reading.size}" to "en cours", "${fresh.sumOf { it.newChapters }}" to "nouveaux chap.",
+                    "${hub.works.count { it.complete && it.id !in hub.hidden }}" to "terminées").forEach { (n, l) ->
+                    Column(Modifier.weight(1f).clip(RoundedCornerShape(18.dp)).background(Surf).padding(vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(n, style = TextStyle(brush = Grad, fontSize = 18.sp, fontWeight = FontWeight.Black), maxLines = 1)
+                        Text(l, color = Mut, fontSize = 10.sp, maxLines = 1)
+                    }
+                }
+            }
+        }
         if (hub.user == null && hub.users.isEmpty()) item {
             Row(Modifier.padding(20.dp).fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Surf).clickable { hub.tab = 3 }.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Configure tes comptes", color = Txt, fontSize = 15.sp, modifier = Modifier.weight(1f))
                 Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Mut)
             }
         }
-        if (reading.isNotEmpty()) {
-            item { Section("Reprendre la lecture") }
+        item { Section("Tes sites") }
+        item { ShelfStrip(hub) }
+        if (fresh.isNotEmpty()) {
+            item { Section("Nouveaux chapitres · ${fresh.size}") }
             item {
                 LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    items(reading, key = { it.id }) { w -> Book3D(w, 100, Modifier.clickable { hub.push(Screen.Web(w.link, w.title)) }) }
+                    items(fresh, key = { "n" + it.id }) { w -> Book3D(w, 100, Modifier.clickable { hub.push(Screen.Detail(w.id)) }) }
                 }
             }
         }
-        item { Section(if (fresh.isEmpty()) "Nouveaux chapitres" else "Nouveaux chapitres · ${fresh.size}") }
-        if (fresh.isEmpty()) item { Empty(if (hub.works.isEmpty()) "Touche un volume." else "À jour ✓") }
-        items(fresh, key = { it.id }) { w ->
-            WorkCard(w, Modifier.padding(horizontal = 20.dp, vertical = 6.dp).animateItem()) { hub.push(Screen.Detail(w.id)) }
+        val more = reading.filter { it.id != last?.id }
+        if (more.isNotEmpty()) {
+            item { Section("Reprendre la lecture") }
+            item {
+                LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    items(more, key = { "r" + it.id }) { w -> Book3D(w, 100, Modifier.clickable { hub.push(Screen.Web(w.link, w.title)) }) }
+                }
+            }
         }
+        if (fandoms.isNotEmpty()) {
+            item { Section("Tes fandoms") }
+            item {
+                LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(fandoms, key = { "f" + it.first }) { (name, n, site) ->
+                        Column(Modifier.clip(RoundedCornerShape(18.dp)).background(Brush.linearGradient(listOf(fandomColor(name).copy(alpha = 0.6f), Surf)))
+                            .clickable { hub.pickSite(site); hub.tab = 1 }.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                            Text(name.take(28), color = Txt, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                            Text("$n histoires", color = Mut, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+        }
+        if (discover.isNotEmpty()) {
+            item { Section("À découvrir dans ta bibliothèque") }
+            item {
+                LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    items(discover, key = { "d" + it.id }) { w -> Book3D(w, 100, Modifier.clickable { hub.push(Screen.Detail(w.id)) }) }
+                }
+            }
+        }
+        if (hub.works.isEmpty()) item { Empty("Touche un volume.") }
     }
 }
 
@@ -620,7 +692,7 @@ fun Accounts(hub: Hub) {
         Title("", page ?: "Réglages")
         // Réglages en pages : un menu qui tient sur l'écran, chaque rubrique s'ouvre à part
         if (page == null) {
-            val tiles = listOf("Comptes" to Icons.Default.Person, "Synchronisation" to Icons.Default.Refresh, "Apparence" to Icons.Default.Star, "Commentaires & messages" to Icons.Default.Email, "Extensions" to Icons.Default.Add, "Application" to Icons.Default.Info)
+            val tiles = listOf("Comptes" to Icons.Default.Person, "Synchronisation" to Icons.Default.Refresh, "Apparence" to Icons.Default.Star, "Extensions" to Icons.Default.Add, "Application" to Icons.Default.Info)
             tiles.chunked(2).forEach { row ->
                 Row(Modifier.padding(horizontal = 16.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     row.forEach { (n, icon) ->
@@ -640,9 +712,13 @@ fun Accounts(hub: Hub) {
                 if (i > 0) Line()
                 val acc = hub.account(s.name)
                 val st = hub.siteStatus[s.name]
+                // Compte et commentaires du site au même endroit
+                val inbox = when (s.name) { "AO3" -> "https://archiveofourown.org/users/${hub.user ?: "login"}/inbox"; "Wattpad" -> "https://www.wattpad.com/notifications"
+                    "FanFiction.net" -> "https://www.fanfiction.net/pm2/inbox.php"; "Spirit Fanfics" -> "https://www.spiritfanfiction.com/notificacoes"; else -> null }
                 SettingRow({ SiteLogo(s.name, 40) }, s.name,
                     sub = st ?: acc?.let { "Connecté · " + it.substringAfterLast("/u/").trimEnd('/') } ?: "Non connecté",
-                    subColor = when { st?.startsWith("Erreur") == true -> Color(0xFFEF4444); acc != null -> s.color; else -> Mut }) { hub.push(Screen.Setup(s.name)) }
+                    subColor = when { st?.startsWith("Erreur") == true -> Color(0xFFEF4444); acc != null -> s.color; else -> Mut },
+                    trail = { inbox?.let { u -> FilterPill("Messages", false) { hub.push(Screen.Web(u, "${s.name} · messages", reader = false)) } } }) { hub.push(Screen.Setup(s.name)) }
             }
         }
         if (page == "Synchronisation") Group("Synchronisation") {
@@ -678,14 +754,6 @@ fun Accounts(hub: Hub) {
             }
             Line()
             SettingRow({ RoundIcon(Icons.Default.Star) }, "Animation du livre", trail = { Switch(hub.bookAnim) }) { hub.toggleBookAnim(!hub.bookAnim) }
-        }
-        // Commentaires et messages : pages officielles des sites (connexion du navigateur intégré), sans mise en page de lecture
-        if (page == "Commentaires & messages") Group("Commentaires & messages") {
-            listOf("AO3" to "https://archiveofourown.org/users/${hub.user ?: "login"}/inbox", "Wattpad" to "https://www.wattpad.com/notifications",
-                "FanFiction.net" to "https://www.fanfiction.net/pm2/inbox.php", "Spirit Fanfics" to "https://www.spiritfanfiction.com/notificacoes")
-                .filter { Ext.on(it.first) }.forEach { (n, u) ->
-                    SettingRow({ SiteLogo(n, 40) }, n, "Commentaires, réponses, messages") { hub.push(Screen.Web(u, "$n · messages", reader = false)) }
-                }
         }
         if (page == "Extensions") Group("Extensions") {
             SettingRow({ RoundIcon(Icons.Default.Add) }, "Extensions", "${Ext.enabled.size} sites · ${Ext.installed.size} de la communauté") { hub.push(Screen.Extensions) }

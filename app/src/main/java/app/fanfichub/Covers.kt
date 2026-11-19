@@ -97,7 +97,11 @@ fun BookCover(w: Work, width: Int, modifier: Modifier = Modifier) {
                 maxLines = 4, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp).weight(1f))
             Text(w.author, color = Color.White.copy(alpha = 0.75f), fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        if (goodCover(w.cover) && w.site == "Spirit Fanfics") SpiritFace(w, width)
+        if (goodCover(w.cover) && w.site == "Spirit Fanfics") {
+            // Image introuvable : on garde la couverture générée (titre + auteur) au lieu d'un cadre vide
+            val ok by produceState<Boolean?>(Img.cached(w.cover)?.let { true }, w.cover) { if (value == null) value = Img.load(w.cover) != null }
+            if (ok != false) SpiritFace(w, width)
+        }
         else if (w.cover.startsWith("montage:")) Montage(w, width)
         else if (goodCover(w.cover)) NetFill(w.cover)
         // Reliure + reflet
@@ -203,7 +207,8 @@ private fun fandomsIn(t: String): Set<String> { val s = " " + t.lowercase() + " 
 fun crossName(t: String) = Regex("(?i)crossover|×").containsMatchIn(t) ||
     (Regex("(?i)\\s[x×]\\s").containsMatchIn(t) && !Regex("(?i)\\sx\\s*(reader|you|oc|harem)").containsMatchIn(t)) || fandomsIn(t).size >= 2
 /** Crossover : plusieurs fandoms (site, tags, titre, résumé) ou titre annonçant un crossover. */
-fun isCrossover(w: Work) = fandomKey(w).startsWith("Crossover") || crossName(w.title) ||
+fun isCrossover(w: Work) = fandomKey(w).startsWith("Crossover") || crossName(w.title) || w.fandoms.any { crossName(it) } ||
+    w.tags.any { Regex("(?i)^(crossover|xover|cross-over)$|crossover").containsMatchIn(it) } ||
     fandomsIn(w.title + " " + w.tags.joinToString(" ") + " " + w.fandoms.joinToString(" ") + " " + w.summary.take(300)).size >= 2
 // Caches : chaque fiche n'est analysée qu'une fois (tri instantané même avec 1 700 fiches)
 private val crossCache = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
