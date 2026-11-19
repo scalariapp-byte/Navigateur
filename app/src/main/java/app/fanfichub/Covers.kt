@@ -169,16 +169,7 @@ private fun Montage(w: Work, width: Int) {
         }
         // Lumière colorée + assombrissement bas pour le titre
         Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(accent.copy(alpha = 0.35f), Color.Transparent, Color.Transparent))))
-        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.55f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.92f))))
-        // Bandeau des fandoms
-        Text(fandoms, color = Color.White, fontSize = 6.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.align(Alignment.TopStart).fillMaxWidth().background(Color.Black.copy(alpha = 0.55f)).padding(horizontal = 6.dp, vertical = 3.dp))
-        Column(Modifier.align(Alignment.BottomStart).padding(7.dp)) {
-            Box(Modifier.size(width = 20.dp, height = 2.dp).background(accent))
-            Text(w.title.uppercase(), color = Color.White, fontSize = (width / 10f).coerceIn(8f, 12f).sp, fontWeight = FontWeight.Black, maxLines = 3,
-                overflow = TextOverflow.Ellipsis, lineHeight = (width / 8f).coerceIn(10f, 15f).sp, letterSpacing = 0.5.sp, modifier = Modifier.padding(top = 4.dp))
-            if (w.author.isNotBlank()) Text(w.author, color = accent.copy(alpha = 0.95f), fontSize = 7.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
+        // Pas de texte sur le montage : l'image seule
     }
 }
 
