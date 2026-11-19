@@ -56,7 +56,7 @@ object Art {
         mem[key]?.let { return it }
         fun parse(s: String) = s.split('\n').filter { '\t' in it }.map { it.substringBefore('\t') to it.substringAfter('\t') }
         prefs.getString(key, null)?.let { s -> return parse(s).also { mem[key] = it } }
-        val m = gql("query(\$s:String){Media(search:\$s,type:ANIME){coverImage{extraLarge} characters(sort:FAVOURITES_DESC,perPage:25){nodes{name{full} image{large}}}}}", name)?.optJSONObject("Media") ?: return emptyList()
+        val m = gql("query(\$s:String){Media(search:\$s,type:ANIME){coverImage{extraLarge} characters(sort:FAVOURITES_DESC,perPage:25){nodes{name{full} image{large}}}}}", name)?.let { it.optJSONObject("Media") ?: JSONObject() } ?: return emptyList() // introuvable (ex. série live) : mis en cache vide
         val out = mutableListOf<Pair<String, String>>()
         m?.optJSONObject("coverImage")?.optString("extraLarge")?.takeIf { it.isNotBlank() }?.let { out += "" to it }
         m?.optJSONObject("characters")?.optJSONArray("nodes")?.let { a -> for (i in 0 until a.length()) { val n = a.getJSONObject(i)
@@ -163,7 +163,7 @@ object Art {
         val sc = scored(w, cands).take(5); val ranked = sc.map { it.first }; val scoreOf = sc.toMap()
         // Personnage principal : son image AniList, sinon (mauvaise ou déjà utilisée ailleurs) une autre de sa galerie
         suspend fun add(c: Triple<String, String, Int>): Boolean {
-            val strict = (scoreOf[c] ?: 0.0) < 6 // personnage vraiment principal : on accepte un gros plan plutôt que de l'omettre
+            val strict = (scoreOf[c] ?: 0.0) < 3 // personnage vraiment principal : on accepte un gros plan plutôt que de l'omettre
             if (c.second !in pics && c.second !in used && good(c.second, strict)) { pics += c.second; return true }
             val alt = pictures(c.first).let { l -> if (l.isEmpty()) l else l.drop(h % l.size) + l.take(h % l.size) }
             for (u in alt) if (u !in pics && u !in used && good(u)) { pics += u; return true }
