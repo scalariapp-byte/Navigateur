@@ -95,6 +95,9 @@ fun HubApp(hub: Hub) {
     MaterialTheme(colorScheme = if (isLight) androidx.compose.material3.lightColorScheme(background = Bg, surface = Surf, primary = A1, onBackground = Txt, onSurface = Txt)
         else darkColorScheme(background = Bg, surface = Surf, primary = A1, onBackground = Txt, onSurface = Txt)) {
         BackHandler(enabled = hub.stack.size > 1) { hub.pop() }
+        // Geste retour sur un onglet : revenir à l'accueil plutôt que quitter l'app
+        BackHandler(enabled = hub.stack.size == 1 && hub.tab != 0) { hub.tab = 0 }
+        BackHandler(enabled = hub.intro != null) { hub.intro = null }
         Box(Modifier.fillMaxSize().background(Bg)) {
             AnimatedContent(
                 targetState = hub.stack.last(),
@@ -441,6 +444,10 @@ fun Library(hub: Hub) {
     val visible = remember(hub.works.size, hub.syncing, site, hub.hidden.size) { hub.visible() }
     var selecting by remember { mutableStateOf(false) }
     val sel = remember { mutableStateListOf<String>() }
+    // Geste retour : quitter la sélection, la recherche ou la collection ouverte avant de changer d'écran
+    BackHandler(enabled = hub.stack.size == 1 && (selecting || searching || col != null)) {
+        when { selecting -> { selecting = false; sel.clear() }; searching -> { searching = false; q = "" }; else -> col = null }
+    }
     fun open(w: Work) { if (selecting) { if (w.id in sel) sel.remove(w.id) else sel.add(w.id) } else hub.push(Screen.Detail(w.id)) }
     val shelves0 = remember(visible) {
         if (site == "ALL") visible.groupBy { it.site }.map { (k, v) -> k to v }.sortedByDescending { it.second.size }
