@@ -141,34 +141,21 @@ private fun Montage(w: Work, width: Int) {
     val fandoms = fandomKey(w).removePrefix("Crossover : ").uppercase()
     val flip = (w.id.hashCode() and 1) == 1 // mise en page miroir une fois sur deux
     Box(Modifier.fillMaxSize().background(Color(0xFF0B0B10))) {
-        // 1. Personnage principal en plein cadre
+        // Deux personnages côte à côte, séparés par une diagonale nette ; visages cadrés en haut
         urls.getOrNull(0)?.let { NetFill(it, alignment = Alignment.TopCenter) }
-        // Lignes de vitesse (manga)
-        androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
-            val c = androidx.compose.ui.geometry.Offset(if (flip) size.width * 0.25f else size.width * 0.75f, size.height * 0.3f)
-            for (k in 0 until 28) {
-                val a = k * (Math.PI * 2 / 28).toFloat(); val r0 = size.maxDimension * 0.55f; val r1 = size.maxDimension * 1.2f
-                drawLine(Color.White.copy(alpha = 0.07f), c + androidx.compose.ui.geometry.Offset(kotlin.math.cos(a) * r0, kotlin.math.sin(a) * r0),
-                    c + androidx.compose.ui.geometry.Offset(kotlin.math.cos(a) * r1, kotlin.math.sin(a) * r1), 2f)
-            }
-        }
-        // 2. Case inclinée en bas (2e personnage), liseré blanc
         urls.getOrNull(1)?.let { u ->
-            val panel = androidx.compose.foundation.shape.GenericShape { sz, _ ->
-                if (flip) { moveTo(0f, sz.height * 0.48f); lineTo(sz.width * 0.62f, sz.height * 0.6f); lineTo(sz.width * 0.62f, sz.height); lineTo(0f, sz.height) }
-                else { moveTo(sz.width * 0.38f, sz.height * 0.6f); lineTo(sz.width, sz.height * 0.48f); lineTo(sz.width, sz.height); lineTo(sz.width * 0.38f, sz.height) }
+            val half = androidx.compose.foundation.shape.GenericShape { sz, _ ->
+                if (flip) { moveTo(0f, 0f); lineTo(sz.width * 0.42f, 0f); lineTo(sz.width * 0.58f, sz.height); lineTo(0f, sz.height) }
+                else { moveTo(sz.width * 0.58f, 0f); lineTo(sz.width, 0f); lineTo(sz.width, sz.height); lineTo(sz.width * 0.42f, sz.height) }
                 close()
             }
-            Box(Modifier.fillMaxSize().clip(panel).background(Color.White).padding(start = if (flip) 0.dp else 2.dp, end = if (flip) 2.dp else 0.dp, top = 2.dp)
-                .clip(panel)) { NetFill(u, alignment = Alignment.TopCenter) }
+            Box(Modifier.fillMaxSize().clip(half)) { NetFill(u, alignment = Alignment.TopCenter) }
+            androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+                val a = if (flip) androidx.compose.ui.geometry.Offset(size.width * 0.42f, 0f) else androidx.compose.ui.geometry.Offset(size.width * 0.58f, 0f)
+                val b = if (flip) androidx.compose.ui.geometry.Offset(size.width * 0.58f, size.height) else androidx.compose.ui.geometry.Offset(size.width * 0.42f, size.height)
+                drawLine(Color.White, a, b, 4f); drawLine(accent, a, b, 2f)
+            }
         }
-        // 3. Petite case en médaillon (3e personnage)
-        urls.getOrNull(2)?.let { u ->
-            Box(Modifier.align(if (flip) Alignment.TopEnd else Alignment.TopStart).padding(top = 22.dp, start = 6.dp, end = 6.dp)
-                .size((width * 0.36f).dp).clip(CircleShape).background(Color.White).padding(2.dp).clip(CircleShape)) { NetFill(u) }
-        }
-        // Lumière colorée + assombrissement bas pour le titre
-        Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(accent.copy(alpha = 0.35f), Color.Transparent, Color.Transparent))))
         // Pas de texte sur le montage : l'image seule
     }
 }
@@ -244,11 +231,15 @@ fun BookRows(works: List<Work>, isSel: (Work) -> Boolean = { false }, onBook: (W
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Bottom) {
                     row.forEach { w -> Box { Book3D(w, bw, Modifier.clickable { onBook(w) }); if (isSel(w)) SelMark(Modifier.align(Alignment.Center)) } }
                 }
-                WoodPlank()
-                // Titre de chaque livre sur l'étagère, juste en dessous
-                Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    row.forEach { w -> Text(w.title, color = Sub, fontSize = 10.sp, lineHeight = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.width((bw + 9).dp)) }
+                // Planche épaisse : le titre de chaque livre est gravé sur sa face avant
+                Column {
+                    Box(Modifier.fillMaxWidth().height(8.dp).background(Brush.verticalGradient(listOf(Color(0xFFA77750), Color(0xFF8A5E3C)))))
+                    Row(Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Color(0xFF6E4A2F), Color(0xFF4A3120)))).padding(horizontal = 4.dp, vertical = 5.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        row.forEach { w -> Text(w.title, color = Color(0xFFF3E3C8), fontSize = 10.sp, lineHeight = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 2,
+                            overflow = TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.width((bw + 9).dp).heightIn(min = 24.dp)) }
+                    }
+                    Box(Modifier.fillMaxWidth().height(12.dp).background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.55f), Color.Transparent))))
                 }
                 Spacer(Modifier.height(10.dp))
             }
