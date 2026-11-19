@@ -354,6 +354,12 @@ object Wattpad : Site {
         jobs.awaitAll()
     }
 
+    /** Adresse de la 1re partie d'une histoire (pour lire directement). */
+    suspend fun firstPart(url: String): String? {
+        val id = Regex("/story/(\\d+)").find(url)?.groupValues?.get(1) ?: return null
+        return runCatching { JSONObject(json("$B/api/v3/stories/$id?fields=parts(url)", "ui")).optJSONArray("parts")?.optJSONObject(0)?.optString("url") }.getOrNull()?.ifBlank { null }
+    }
+
     suspend fun listWorks(id: String): List<Work> = listStories(id).map { work(it).copy(sources = setOf("Recherche")) }
 
     override suspend fun probe(user: String): String {

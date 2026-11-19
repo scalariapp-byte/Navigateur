@@ -864,7 +864,10 @@ fun Detail(hub: Hub, id: String) {
             }
             item {
                 Column(Modifier.padding(horizontal = 20.dp)) {
-                    GradButton("Lire") { hub.push(Screen.Web(w.link, w.title)) }
+                    GradButton("Lire") {
+                        if (w.site == "Wattpad") hub.scope.launch { hub.push(Screen.Web(Wattpad.firstPart(w.link) ?: w.link, w.title)) }
+                        else hub.push(Screen.Web(w.link, w.title))
+                    }
                     if (!hub.inLibrary(id)) { Spacer(Modifier.height(10.dp)); GhostButton("+ Ajouter à ma bibliothèque") { hub.addToLibrary(w) } }
                     if (w.summary.isNotBlank()) {
                         // Résumé seul ; traduit si la traduction auto est active. Toucher le texte bascule VO / FR.
