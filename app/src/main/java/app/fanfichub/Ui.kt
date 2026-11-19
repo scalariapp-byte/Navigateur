@@ -486,14 +486,13 @@ fun Library(hub: Hub) {
             Row(Modifier.statusBarsPadding().padding(start = 22.dp, end = 14.dp, top = 22.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     // Nombre de fics du site : chaque histoire comptée une fois, même si elle est dans plusieurs listes
-                    val stats = remember(visible.size, site) {
-                        val unique = visible.distinctBy { it.title.lowercase().trim() + "|" + it.author.lowercase().trim() }.size
-                        val inLists = visible.sumOf { w -> w.sources.count { it != "Recherche" }.coerceAtLeast(1) }
-                        Triple(visible.size, unique, inLists)
+                    // Total de tous les sites, chaque histoire comptée une fois (même titre + même auteur = doublon)
+                    val total = remember(hub.works.size, hub.hidden.size, hub.syncing) {
+                        hub.works.asSequence().filter { it.id !in hub.hidden }.map { it.title.lowercase().trim() + "|" + it.author.lowercase().trim() }.distinct().count()
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("BIBLIOTHÈQUE", style = TextStyle(brush = Grad, fontSize = 13.sp, fontWeight = FontWeight.Black, letterSpacing = 3.sp))
-                        Text("  ${fmtFull(stats.second)} fanfictions", color = Mut, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                        Text("  ${fmtFull(total)} fanfictions", color = Mut, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
                     }
                     Text(col?.let { collectionName(it) } ?: if (site == "ALL") "Tout" else site, color = Txt, fontSize = 30.sp, fontWeight = FontWeight.Bold,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
