@@ -33,6 +33,8 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
@@ -480,6 +482,20 @@ fun Library(hub: Hub) {
                     Text(col?.let { collectionName(it) } ?: if (site == "ALL") "Tout" else site, color = Txt, fontSize = 30.sp, fontWeight = FontWeight.Bold,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
+                // Tri : bouton discret, les choix s'ouvrent au toucher
+                if (!selecting) Box {
+                    var sortOpen by remember { mutableStateOf(false) }
+                    Box(Modifier.size(44.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.35f)).clickable { sortOpen = true }, contentAlignment = Alignment.Center) {
+                        Text("⇅", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    }
+                    DropdownMenu(sortOpen, { sortOpen = false }, modifier = Modifier.background(Surf2)) {
+                        listOf("A–Z", "Récent", "Crossovers d'abord").forEachIndexed { i, t ->
+                            DropdownMenuItem(text = { Text((if (hub.sortMode == i) "✓  " else "     ") + t, color = if (hub.sortMode == i) Txt else Mut, fontWeight = if (hub.sortMode == i) FontWeight.Bold else FontWeight.Normal) },
+                                onClick = { hub.setSort(i); sortOpen = false })
+                        }
+                    }
+                }
+                if (!selecting) Spacer(Modifier.width(8.dp))
                 if (!selecting) CircleIcon(Icons.Default.Search) { searching = !searching; if (!searching) q = "" }
                 Spacer(Modifier.width(8.dp))
                 CircleIcon(if (selecting) Icons.Default.Close else Icons.Default.Delete) { selecting = !selecting; sel.clear() }
@@ -505,12 +521,6 @@ fun Library(hub: Hub) {
             }
         }
         item { SiteChips(hub) }
-        // Tri des listes de lecture (tous les sites)
-        item {
-            Row(Modifier.padding(start = 20.dp, top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("A–Z", "Récent", "Crossovers d'abord").forEachIndexed { i, t -> FilterPill(t, hub.sortMode == i) { hub.setSort(i) } }
-            }
-        }
         if (adding) item {
             Column(Modifier.padding(top = 12.dp)) {
                 SearchBox(link, "Colle le lien d'une fanfiction") { link = it }
