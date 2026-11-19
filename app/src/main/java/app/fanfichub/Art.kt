@@ -70,11 +70,13 @@ object Art {
 
     /** Autres images d'un personnage (galerie MyAnimeList via Jikan) : utile quand l'image AniList est mauvaise ou déjà prise. */
     private val jikanGate = kotlinx.coroutines.sync.Mutex()
+    @Volatile private var jikanDownUntil = 0L
     private suspend fun pictures(name: String): List<String> {
         val key = "J:" + name.lowercase()
         prefs.getString(key, null)?.let { s -> return s.split('\n').filter { it.isNotBlank() } }
-        val out = jikanGate.withLock { withContext(Dispatchers.IO) { runCatching {
-            fun get(u: String) = JSONObject(Jsoup.connect(u).ignoreContentType(true).timeout(15000).execute().also { lastJikan = "HTTP ${it.statusCode()}" }.body())
+        if (System.currentTimeMillis() < jikanDownUntil) return emptyList() // Jikan injoignable : on n'attend pas
+        val out = jikanGate.withLock { if (System.currentTimeMillis() < jikanDownUntil) null else withContext(Dispatchers.IO) { runCatching {
+            fun get(u: String) = JSONObject(Jsoup.connect(u).ignoreContentType(true).timeout(6000).execute().also { lastJikan = "HTTP ${it.statusCode()}" }.body())
             kotlinx.coroutines.delay(400) // limite de Jikan : 3 requêtes/s
             val c = get("https://api.jikan.moe/v4/characters?limit=1&order_by=favorites&sort=desc&q=" + java.net.URLEncoder.encode(name, "UTF-8"))
                 .optJSONArray("data")?.optJSONObject(0) ?: return@runCatching emptyList<String>()
@@ -83,7 +85,7 @@ object Art {
             kotlinx.coroutines.delay(400)
             val a = get("https://api.jikan.moe/v4/characters/${c.optInt("mal_id")}/pictures").optJSONArray("data") ?: return@runCatching emptyList<String>()
             (0 until a.length()).mapNotNull { a.getJSONObject(it).optJSONObject("jpg")?.optString("image_url")?.takeIf { u -> u.isNotBlank() } }.take(10)
-        }.onFailure { lastJikan = "ERREUR ${it.javaClass.simpleName} ${it.message?.take(80)}" }.getOrNull() } }
+        }.onFailure { jikanDownUntil = System.currentTimeMillis() + 30 * 60_000; lastJikan = "ERREUR ${it.javaClass.simpleName} ${it.message?.take(80)}" }.getOrNull() } }
         if (out != null) prefs.edit().putString(key, out.joinToString("\n")).apply()
         return out.orEmpty()
     }
@@ -118,14 +120,18 @@ object Art {
      * Contrôle qualité d'une image : rejette les images trop petites, presque blanches, presque noires ou sans contraste
      * (fonds vides, images par défaut). Résultat mis en cache.
      */
-    suspend fun good(url: String): Boolean {
-        val key = "q2:$url"
-        if (prefs.contains(key)) return prefs.getBoolean(key, false)
+    /** strict = aussi rejeter les gros plans (beaucoup de peau). Les personnages principaux passent en mode souple. */
+    suspend fun good(url: String, strict: Boolean = true): Boolean { val v = quality(url); return v >= 0 && (!strict || v < 33) }
+    /** -1 = image inutilisable (absente, petite, couchée, vide), sinon % de peau sur l'image. Mis en cache. */
+    fun cachedQuality(url: String): Int? = if (prefs.contains("q3:$url")) prefs.getInt("q3:$url", -1) else null
+    private suspend fun quality(url: String): Int {
+        val key = "q3:$url"
+        if (prefs.contains(key)) return prefs.getInt(key, -1)
         val ok = runCatching {
-            val b = Img.load(url)?.asAndroidBitmap() ?: return@runCatching false
-            if (b.width < 100 || b.height < 120) return@runCatching false
+            val b = Img.load(url)?.asAndroidBitmap() ?: return@runCatching -1
+            if (b.width < 100 || b.height < 120) return@runCatching -1
             // Portrait obligatoire : les images couchées ou en bandeau coupent les têtes dans une demi-couverture
-            if (b.height < b.width * 1.05f) return@runCatching false
+            if (b.height < b.width * 1.05f) return@runCatching -1
             var sum = 0.0; var sq = 0.0; var n = 0; var skin = 0
             for (y in 0 until 16) for (x in 0 until 16) {
                 val p = b.getPixel(x * (b.width - 1) / 15, (y * (b.height - 1) / 15))
@@ -136,9 +142,10 @@ object Art {
             }
             val mean = sum / n; val sd = kotlin.math.sqrt((sq / n - mean * mean).coerceAtLeast(0.0))
             // Gros plan (bouche, main, visage zoomé) = trop de peau sur l'image → rejeté
-            mean in 25.0..225.0 && sd > 30 && skin < n * 0.33
-        }.getOrDefault(false)
-        prefs.edit().putBoolean(key, ok).apply(); return ok
+            if (mean in 25.0..225.0 && sd > 30) skin * 100 / n else -1
+        }.getOrDefault(-2)
+        if (ok != -2) prefs.edit().putInt(key, ok).apply() // échec de chargement : pas mis en cache
+        return ok.coerceAtLeast(-1)
     }
 
     /** Couverture montée : les 2 personnages principaux (un par fandom en crossover), sinon des personnages de l'œuvre. */
@@ -153,13 +160,14 @@ object Art {
             val tk = tokens(t); if (tk.isEmpty() || cands.any { c -> tokens(c.first).containsAll(tk) }) continue
             character(t.substringBefore(" (").trim())?.let { cands += Triple(t.substringBefore(" (").trim(), it, -1) }
         }
-        val ranked = rank(w, cands).take(5)
+        val sc = scored(w, cands).take(5); val ranked = sc.map { it.first }; val scoreOf = sc.toMap()
         // Personnage principal : son image AniList, sinon (mauvaise ou déjà utilisée ailleurs) une autre de sa galerie
         suspend fun add(c: Triple<String, String, Int>): Boolean {
-            if (c.second !in pics && c.second !in used && good(c.second)) { pics += c.second; return true }
+            val strict = (scoreOf[c] ?: 0.0) < 6 // personnage vraiment principal : on accepte un gros plan plutôt que de l'omettre
+            if (c.second !in pics && c.second !in used && good(c.second, strict)) { pics += c.second; return true }
             val alt = pictures(c.first).let { l -> if (l.isEmpty()) l else l.drop(h % l.size) + l.take(h % l.size) }
             for (u in alt) if (u !in pics && u !in used && good(u)) { pics += u; return true }
-            if (c.second !in pics && good(c.second)) { pics += c.second; return true }
+            if (c.second !in pics && good(c.second, strict)) { pics += c.second; return true }
             return false
         }
         if (fs.size > 1) for (k in fs.indices) { if (pics.size >= 2) break; for (c in ranked.filter { it.third == k || it.third == -1 }) if (add(c)) break }
@@ -199,7 +207,7 @@ object Art {
         }
         val sc = scored(w, cands).take(5)
         if (cands.isNotEmpty() && sc.isEmpty()) r.append("    aucun personnage reconnu dans titre/résumé/tags → personnages populaires\n")
-        fun q(u: String) = if (!prefs.contains("q2:$u")) "non testée" else if (prefs.getBoolean("q2:$u", false)) "OK" else "rejetée"
+        fun q(u: String) = when (val v = cachedQuality(u)) { null -> "non testée"; -1 -> "inutilisable"; else -> if (v < 33) "OK" else "gros plan ($v % peau)" }
         for ((c, v) in sc) {
             val gal = prefs.getString("J:" + c.first.lowercase(), null)?.split('\n')?.filter { it.isNotBlank() }
             val onCover = w.cover.contains(c.second) || gal.orEmpty().any { w.cover.contains(it) }
