@@ -47,6 +47,21 @@ object Art {
         prefs.edit().putString(key, out.joinToString("\n")).apply(); mem[key] = out; return out
     }
 
+    /** Couverture montée : jusqu'à 3 images (personnages des tags, puis un par fandom), propres à l'histoire. */
+    suspend fun montage(w: Work): String? {
+        val h = w.id.hashCode() and 0x7fffffff
+        val pics = mutableListOf<String>()
+        for (t in w.tags.take(4)) {
+            if (pics.size >= 2) break
+            if (t.length > 40 || Regex("[/&:]").containsMatchIn(t)) continue
+            character(t.substringBefore(" (").trim())?.let { if (it !in pics) pics += it }
+        }
+        val fs = fandomKey(w).removePrefix("Crossover : ").split(" × ").map { it.trim() }.filter { it.isNotBlank() && it != "Sans fandom" }
+        fs.forEachIndexed { k, f -> val pool = media(f).drop(1); if (pool.isNotEmpty() && pics.size < 3) pool[(h / (k + 1)) % pool.size].let { if (it !in pics) pics += it } }
+        if (pics.size < 2) fs.firstOrNull()?.let { media(it).drop(1) }?.takeIf { it.size > 1 }?.let { pool -> pics += pool[(h / 7 + 3) % pool.size].takeIf { it !in pics } ?: pool[(h + 1) % pool.size] }
+        return when { pics.size >= 2 -> "montage:" + pics.distinct().take(3).joinToString("|"); pics.size == 1 -> pics[0]; else -> null }
+    }
+
     /** Image pour une fiche : personnage (tags en tête = personnages sur AO3), sinon l'œuvre du fandom. */
     suspend fun forWork(w: Work): String? {
         for (t in w.tags.take(3)) {

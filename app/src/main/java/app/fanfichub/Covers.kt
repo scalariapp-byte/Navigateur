@@ -98,6 +98,7 @@ fun BookCover(w: Work, width: Int, modifier: Modifier = Modifier) {
             Text(w.author, color = Color.White.copy(alpha = 0.75f), fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (goodCover(w.cover) && w.site == "Spirit Fanfics") SpiritFace(w, width)
+        else if (w.cover.startsWith("montage:")) Montage(w, width)
         else if (goodCover(w.cover)) NetFill(w.cover)
         // Reliure + reflet
         Box(Modifier.fillMaxHeight().width(5.dp).background(Brush.horizontalGradient(listOf(Color.Black.copy(alpha = 0.35f), Color.Transparent))))
@@ -126,6 +127,40 @@ private fun SpiritFace(w: Work, width: Int) {
         Spacer(Modifier.weight(1f))
         Text(w.author.uppercase(), color = gold, fontSize = 7.sp, letterSpacing = 1.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.fillMaxWidth())
+    }
+}
+
+/**
+ * Couverture montée : 2 ou 3 personnages en bandes inclinées, liseré, dégradé et titre en bas.
+ * Chaque histoire a sa combinaison (personnages de ses tags et de ses fandoms).
+ */
+@Composable
+private fun Montage(w: Work, width: Int) {
+    val urls = w.cover.removePrefix("montage:").split('|').filter { it.isNotBlank() }
+    val accent = fandomColor(w.fandom)
+    Box(Modifier.fillMaxSize().background(Color(0xFF101014))) {
+        val n = urls.size.coerceAtLeast(1)
+        urls.forEachIndexed { i, u ->
+            // Bande i : parallélogramme incliné qui couvre 1/n de la largeur
+            val shape = androidx.compose.foundation.shape.GenericShape { sz, _ ->
+                val step = sz.width / n; val skew = sz.width * 0.18f
+                val x0 = step * i; val x1 = step * (i + 1)
+                moveTo(if (i == 0) 0f else x0 + skew / 2, 0f); lineTo(if (i == n - 1) sz.width else x1 + skew / 2, 0f)
+                lineTo(if (i == n - 1) sz.width else x1 - skew / 2, sz.height); lineTo(if (i == 0) 0f else x0 - skew / 2, sz.height); close()
+            }
+            Box(Modifier.fillMaxSize().clip(shape)) { NetFill(u, alignment = Alignment.TopCenter) }
+        }
+        // Liserés entre les bandes
+        androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+            val step = size.width / n; val skew = size.width * 0.18f
+            for (i in 1 until n) drawLine(accent, androidx.compose.ui.geometry.Offset(step * i + skew / 2, 0f), androidx.compose.ui.geometry.Offset(step * i - skew / 2, size.height), 3f)
+        }
+        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Transparent, Color.Black.copy(alpha = 0.85f)))))
+        Column(Modifier.align(Alignment.BottomStart).padding(7.dp)) {
+            Box(Modifier.size(width = 18.dp, height = 2.dp).background(accent))
+            Text(w.title, color = Color.White, fontSize = (width / 9f).coerceIn(9f, 13f).sp, fontWeight = FontWeight.Black, maxLines = 3,
+                overflow = TextOverflow.Ellipsis, lineHeight = (width / 7.5f).coerceIn(11f, 16f).sp, modifier = Modifier.padding(top = 4.dp))
+        }
     }
 }
 

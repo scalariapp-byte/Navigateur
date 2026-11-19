@@ -547,14 +547,14 @@ class Hub(ctx: Context) {
                 // 3 à la fois ; les noms déjà connus sont instantanés (cache), on n'attend que les nouveaux
                 val gate = kotlinx.coroutines.sync.Semaphore(3)
                 works.filter { it.site == "AO3" && (it.cover.isBlank() || "anilist" in it.cover) }.map { w -> async { gate.withPermit {
-                    runCatching { Art.forWork(w) }.getOrNull()?.let { url -> val i = works.indexOfFirst { it.id == w.id }; if (i >= 0 && works[i].cover != url) works[i] = works[i].copy(cover = url) }
+                    runCatching { Art.montage(w) ?: Art.forWork(w) }.getOrNull()?.let { url -> val i = works.indexOfFirst { it.id == w.id }; if (i >= 0 && works[i].cover != url) works[i] = works[i].copy(cover = url) }
                 } } }.awaitAll()
                 persist()
             } finally { arting = false }
         }
     }
 
-    fun prefetchCovers() { scope.launch { Img.prefetch(works.sortedByDescending { it.lastRead }.map { it.cover }) } }
+    fun prefetchCovers() { scope.launch { Img.prefetch(works.sortedByDescending { it.lastRead }.flatMap { if (it.cover.startsWith("montage:")) it.cover.removePrefix("montage:").split('|') else listOf(it.cover) }) } }
 
     /** Vrai une seule fois après l'installation d'une nouvelle version. */
     /** Remise à zéro unique des pastilles faussées par les anciennes fiches incorrectes (hors AO3). */
