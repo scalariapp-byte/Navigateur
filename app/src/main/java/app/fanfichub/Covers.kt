@@ -244,6 +244,11 @@ fun BookRows(works: List<Work>, isSel: (Work) -> Boolean = { false }, onBook: (W
                     row.forEach { w -> Box { Book3D(w, bw, Modifier.clickable { onBook(w) }); if (isSel(w)) SelMark(Modifier.align(Alignment.Center)) } }
                 }
                 WoodPlank()
+                // Titre de chaque livre sur l'étagère, juste en dessous
+                Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    row.forEach { w -> Text(w.title, color = Sub, fontSize = 10.sp, lineHeight = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.width((bw + 9).dp)) }
+                }
                 Spacer(Modifier.height(10.dp))
             }
         }
