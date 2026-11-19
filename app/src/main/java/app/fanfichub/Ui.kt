@@ -669,8 +669,10 @@ fun Accounts(hub: Hub) {
                 trail = { if (hub.newVersion != null) FilterPill(hub.updating?.let { "${(it * 100).toInt()} %" } ?: "Mettre à jour", true) { hub.startUpdate() } }) {
                 if (hub.newVersion != null) hub.startUpdate() else hub.startCheck(manual = true)
             }
-            SettingRow({ RoundIcon(Icons.Default.Info) }, "Diagnostic",
-                if (hub.diagRunning) "En cours… touche pour annuler" else null) { hub.runDiag() }
+            DIAGS.forEach { (k, label) ->
+                SettingRow({ RoundIcon(Icons.Default.Info) }, "Diagnostic · $label",
+                    if (hub.diagRunning && hub.diagKind == k) "En cours… touche pour annuler" else if (hub.diagRunning) "Un autre diagnostic est en cours" else null) { if (!hub.diagRunning || hub.diagKind == k) hub.runDiag(k) }
+            }
         }
     }
 }

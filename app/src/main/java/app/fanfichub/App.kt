@@ -35,6 +35,8 @@ sealed interface Screen {
     data object Extensions : Screen
 }
 
+val DIAGS = linkedMapOf("all" to "Toute l'app", "covers" to "Couvertures", "sites" to "Sites et synchro", "read" to "Traduction et lecture", "app" to "App et stockage")
+
 class Hub(ctx: Context) {
     private val app = ctx.applicationContext
     private val store = Store(ctx.filesDir)
@@ -207,14 +209,16 @@ class Hub(ctx: Context) {
     } }
 
     private var diagJob: kotlinx.coroutines.Job? = null
+    var diagKind by mutableStateOf("all"); private set
     fun cancelDiag() { diagJob?.cancel(); diagRunning = false }
-    fun runDiag() { if (diagRunning) { cancelDiag(); return }; diagRunning = true; diagJob = scope.launch {
+    fun runDiag(kind: String = "all") { if (diagRunning) { cancelDiag(); return }; diagRunning = true; diagKind = kind; diagJob = scope.launch {
+        fun on(vararg k: String) = kind == "all" || kind in k
         val out = StringBuffer()
         fun log(s: String) { out.append(s).append('\n') }
-        log("Fanfic Hub v$version · Android ${android.os.Build.VERSION.RELEASE} · ${android.os.Build.MODEL}")
+        log("Diagnostic « ${DIAGS[kind] ?: kind} » · Fanfic Hub v$version · Android ${android.os.Build.VERSION.RELEASE} · ${android.os.Build.MODEL}")
         val ls = prefs.getLong("lastSync", 0)
         log("Dernière synchro complète : " + if (ls == 0L) "jamais" else "il y a ${(System.currentTimeMillis() - ls) / 60000} min" + if (syncing) " · synchro en cours" else "")
-        val reports = Sites.all.map { site -> async(Dispatchers.IO) {
+        val reports = if (!on("sites")) emptyList() else Sites.all.map { site -> async(Dispatchers.IO) {
             val r = StringBuilder()
             val mine = works.filter { it.site == site.name }
             val noSum = mine.filter { it.summary.isBlank() }
@@ -230,10 +234,13 @@ class Hub(ctx: Context) {
         } }.awaitAll()
         reports.forEach { out.append(it) }
         // AO3 et l'app elle-même
+        if (on("sites")) {
         log("\n== AO3 · compte ${user ?: "aucun"} · ${siteStatus["AO3"] ?: "pas de synchro depuis l'ouverture"}")
         works.filter { it.site == "AO3" }.let { a -> log("  ${a.size} fiches · sans résumé ${a.count { it.summary.isBlank() }} · nouveaux chapitres ${a.count { it.newChapters > 0 }}") }
         user?.let { u -> val t0 = System.currentTimeMillis()
             log("  test favoris : " + runCatching { withContext(Dispatchers.IO) { Ao3.page("/users/$u/bookmarks", "Favori").first.size } }.fold({ "$it fiches (${System.currentTimeMillis() - t0} ms)" }, { "ERREUR ${it.message}" })) }
+        }
+        if (on("app")) {
         log("\n== App")
         log("  version ${version} · dernière en ligne ${runCatching { Updater.latest() }.getOrNull() ?: "?"}")
         log("  fiches : ${works.size} au total · " + works.groupingBy { it.site }.eachCount().entries.joinToString(" · ") { "${it.key} ${it.value}" })
@@ -241,17 +248,26 @@ class Hub(ctx: Context) {
         val rt = Runtime.getRuntime()
         log("  mémoire : ${(rt.totalMemory() - rt.freeMemory()) / 1048576} Mo utilisés / ${rt.maxMemory() / 1048576} Mo")
         log("  WebView : ${runCatching { android.webkit.WebView.getCurrentWebViewPackage()?.versionName }.getOrNull() ?: "?"}")
+        }
+        if (on("read")) {
+        log("\n== Traduction et lecture")
         val t1 = System.currentTimeMillis()
         log("  traduction : " + runCatching { Translator.texts(listOf("Hello, the pirate king is here.")).first() }.fold({ "« $it » (${System.currentTimeMillis() - t1} ms)" }, { "ERREUR ${it.message}" }))
+        log("  réglages : traduction auto ${autoTr} · thème ${theme} · taille ${size} · animation ${bookAnim}")
+        }
+        if (on("covers")) {
+        log("\n== Couvertures")
         val t2 = System.currentTimeMillis()
         log("  image de couverture : " + (works.firstOrNull { goodCover(it.cover) }?.let { w -> runCatching { Img.load(w.cover) }.getOrNull()?.let { "chargée (${it.width}×${it.height}, ${System.currentTimeMillis() - t2} ms)" } ?: "échec ${w.cover.take(60)}" } ?: "aucune"))
+        Sites.all.map { it.name }.plus("AO3").distinct().forEach { n -> val m = works.filter { it.site == n }
+            if (m.isNotEmpty()) log("  $n : ${m.size} fiches · couverture valable ${m.count { goodCover(it.cover) }} · vide ${m.count { it.cover.isBlank() }} · doublon ${m.count { it.cover.isNotBlank() && it.cover in dupCovers }}") }
         log("\n== Couvertures AO3 illustrées")
         log("  ${if (arting) "calcul en cours · " else ""}$artLog")
         works.filter { it.site == "AO3" }.let { a -> log("  ${a.size} fiches · montage ${a.count { it.cover.startsWith("montage:") }} · image seule ${a.count { it.cover.isNotBlank() && !it.cover.startsWith("montage:") }} · vides ${a.count { it.cover.isBlank() }}") }
-        works.filter { it.site == "AO3" }.sortedByDescending { if ("luffy" in it.title.lowercase()) 1 else 0 }.take(2).forEach { w ->
+        works.filter { it.site == "AO3" }.sortedByDescending { (if ("luffy" in it.title.lowercase()) 2 else 0) + (if (isCrossover(it)) 1 else 0) }.take(if (kind == "covers") 5 else 2).forEach { w ->
             kotlinx.coroutines.withTimeoutOrNull(90_000) { runCatching { Art.explain(w) }.getOrElse { "  ! ${it.message}\n" } }?.let { out.append(it) } ?: log("  ! délai dépassé pour ${w.title.take(40)} (AniList ${Art.lastAni})") }
-        log("  réglages : traduction auto ${autoTr} · thème ${theme} · taille ${size} · animation ${bookAnim}")
-        java.io.File(app.filesDir, "crash.txt").takeIf { it.exists() }?.let { log("  DERNIER PLANTAGE :\n" + it.readText().take(600)) } ?: log("  aucun plantage enregistré")
+        }
+        if (on("app")) java.io.File(app.filesDir, "crash.txt").takeIf { it.exists() }?.let { log("  DERNIER PLANTAGE :\n" + it.readText().take(600)) } ?: log("  aucun plantage enregistré")
         diagRunning = false
         val txt = out.toString()
         runCatching { (app.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(android.content.ClipData.newPlainText("diag", txt)) }
