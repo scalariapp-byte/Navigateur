@@ -5,6 +5,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import org.jsoup.Jsoup
+import androidx.compose.ui.graphics.asAndroidBitmap
 
 /**
  * Couvertures illustrées pour les fiches sans image (AO3) : image officielle du personnage principal,
@@ -47,6 +48,28 @@ object Art {
         prefs.edit().putString(key, out.joinToString("\n")).apply(); mem[key] = out; return out
     }
 
+    /**
+     * Contrôle qualité d'une image : rejette les images trop petites, presque blanches, presque noires ou sans contraste
+     * (fonds vides, images par défaut). Résultat mis en cache.
+     */
+    suspend fun good(url: String): Boolean {
+        val key = "q:$url"
+        if (prefs.contains(key)) return prefs.getBoolean(key, false)
+        val ok = runCatching {
+            val b = Img.load(url)?.asAndroidBitmap() ?: return@runCatching false
+            if (b.width < 100 || b.height < 120) return@runCatching false
+            var sum = 0.0; var sq = 0.0; var n = 0
+            for (y in 0 until 16) for (x in 0 until 16) {
+                val p = b.getPixel(x * (b.width - 1) / 15, (y * (b.height - 1) / 15))
+                val l = 0.299 * ((p shr 16) and 255) + 0.587 * ((p shr 8) and 255) + 0.114 * (p and 255)
+                sum += l; sq += l * l; n++
+            }
+            val mean = sum / n; val sd = kotlin.math.sqrt((sq / n - mean * mean).coerceAtLeast(0.0))
+            mean in 25.0..225.0 && sd > 30
+        }.getOrDefault(false)
+        prefs.edit().putBoolean(key, ok).apply(); return ok
+    }
+
     /** Couverture montée : jusqu'à 3 images (personnages des tags, puis un par fandom), propres à l'histoire. */
     suspend fun montage(w: Work): String? {
         val h = w.id.hashCode() and 0x7fffffff
@@ -54,12 +77,18 @@ object Art {
         for (t in w.tags.take(4)) {
             if (pics.size >= 2) break
             if (t.length > 40 || Regex("[/&:]").containsMatchIn(t)) continue
-            character(t.substringBefore(" (").trim())?.let { if (it !in pics) pics += it }
+            character(t.substringBefore(" (").trim())?.let { if (it !in pics && good(it)) pics += it }
         }
         val fs = fandomKey(w).removePrefix("Crossover : ").split(" × ").map { it.trim() }.filter { it.isNotBlank() && it != "Sans fandom" }
-        fs.forEachIndexed { k, f -> val pool = media(f).drop(1); if (pool.isNotEmpty() && pics.size < 3) pool[(h / (k + 1)) % pool.size].let { if (it !in pics) pics += it } }
-        if (pics.size < 2) fs.firstOrNull()?.let { media(it).drop(1) }?.takeIf { it.size > 1 }?.let { pool -> pics += pool[(h / 7 + 3) % pool.size].takeIf { it !in pics } ?: pool[(h + 1) % pool.size] }
-        return when { pics.size >= 2 -> "montage:" + pics.distinct().take(3).joinToString("|"); pics.size == 1 -> pics[0]; else -> null }
+        // Une bonne image par fandom (on essaie plusieurs candidats si la première est mauvaise)
+        suspend fun pickFrom(pool: List<String>, seed: Int): String? {
+            if (pool.isEmpty()) return null
+            for (k in 0 until minOf(6, pool.size)) { val u = pool[(seed + k * 7) % pool.size]; if (u !in pics && good(u)) return u }
+            return null
+        }
+        fs.forEachIndexed { k, f -> if (pics.size < 2) pickFrom(media(f).drop(1), h / (k + 1))?.let { pics += it } }
+        if (pics.size < 2) fs.firstOrNull()?.let { pickFrom(media(it).drop(1), h / 7 + 3) }?.let { pics += it }
+        return when { pics.size >= 2 -> "montage:" + pics.take(2).joinToString("|"); pics.size == 1 -> pics[0]; else -> null }
     }
 
     /** Image pour une fiche : personnage (tags en tête = personnages sur AO3), sinon l'œuvre du fandom. */
