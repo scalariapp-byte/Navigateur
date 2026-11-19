@@ -494,7 +494,9 @@ fun Library(hub: Hub) {
                         Text("BIBLIOTHÈQUE", style = TextStyle(brush = Grad, fontSize = 13.sp, fontWeight = FontWeight.Black, letterSpacing = 3.sp))
                         Text("  ${fmtFull(total)} fanfictions", color = Mut, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
                     }
-                    Text(col?.let { collectionName(it) } ?: if (site == "ALL") "Tout" else site, color = Txt, fontSize = 30.sp, fontWeight = FontWeight.Bold,
+                    val head = col?.let { collectionName(it) } ?: if (site == "ALL") "Tout" else site
+                    // Taille adaptée à la longueur : « FanFiction.net » tient en entier à côté des boutons
+                    Text(head, color = Txt, fontSize = when { head.length <= 10 -> 30.sp; head.length <= 15 -> 24.sp; else -> 20.sp }, fontWeight = FontWeight.Bold,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 // Tri : bouton discret, les choix s'ouvrent au toucher
