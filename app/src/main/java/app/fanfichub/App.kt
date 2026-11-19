@@ -544,6 +544,7 @@ class Hub(ctx: Context) {
     private var arting = false
     fun fillArt() {
         if (arting) return; arting = true
+        Art.used.clear()
         scope.launch {
             try {
                 // 3 à la fois ; les noms déjà connus sont instantanés (cache), on n'attend que les nouveaux

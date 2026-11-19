@@ -3,6 +3,7 @@ package app.fanfichub
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 import org.jsoup.Jsoup
 import androidx.compose.ui.graphics.asAndroidBitmap
@@ -49,6 +50,29 @@ object Art {
             val img = n.optJSONObject("image")?.optString("large").orEmpty()
             if (img.isNotBlank() && "default" !in img) out += n.optJSONObject("name")?.optString("full").orEmpty() to img } }
         prefs.edit().putString(key, out.joinToString("\n") { it.first.replace('\t', ' ') + "\t" + it.second }).apply(); mem[key] = out; return out
+    }
+
+    /** Images déjà posées sur une autre couverture (pour varier d'une histoire à l'autre). */
+    val used: MutableSet<String> = java.util.Collections.synchronizedSet(HashSet())
+
+    /** Autres images d'un personnage (galerie MyAnimeList via Jikan) : utile quand l'image AniList est mauvaise ou déjà prise. */
+    private val jikanGate = kotlinx.coroutines.sync.Mutex()
+    private suspend fun pictures(name: String): List<String> {
+        val key = "J:" + name.lowercase()
+        prefs.getString(key, null)?.let { s -> return s.split('\n').filter { it.isNotBlank() } }
+        val out = jikanGate.withLock { withContext(Dispatchers.IO) { runCatching {
+            fun get(u: String) = JSONObject(Jsoup.connect(u).ignoreContentType(true).timeout(15000).execute().body())
+            kotlinx.coroutines.delay(400) // limite de Jikan : 3 requêtes/s
+            val c = get("https://api.jikan.moe/v4/characters?limit=1&order_by=favorites&sort=desc&q=" + java.net.URLEncoder.encode(name, "UTF-8"))
+                .optJSONArray("data")?.optJSONObject(0) ?: return@runCatching emptyList<String>()
+            val found = c.optString("name").lowercase()
+            if (tokens(name).none { found.contains(it) }) return@runCatching emptyList<String>()
+            kotlinx.coroutines.delay(400)
+            val a = get("https://api.jikan.moe/v4/characters/${c.optInt("mal_id")}/pictures").optJSONArray("data") ?: return@runCatching emptyList<String>()
+            (0 until a.length()).mapNotNull { a.getJSONObject(it).optJSONObject("jpg")?.optString("image_url")?.takeIf { u -> u.isNotBlank() } }.take(10)
+        }.getOrNull() } }
+        if (out != null) prefs.edit().putString(key, out.joinToString("\n")).apply()
+        return out.orEmpty()
     }
 
     private val STOP = setOf("the", "and", "von", "van", "der", "del", "les", "des")
@@ -115,18 +139,27 @@ object Art {
             val tk = tokens(t); if (tk.isEmpty() || cands.any { c -> tokens(c.first).containsAll(tk) }) continue
             character(t.substringBefore(" (").trim())?.let { cands += Triple(t.substringBefore(" (").trim(), it, -1) }
         }
-        val ranked = rank(w, cands)
-        suspend fun add(c: Triple<String, String, Int>) = if (c.second !in pics && good(c.second)) { pics += c.second; true } else false
+        val ranked = rank(w, cands).take(5)
+        // Personnage principal : son image AniList, sinon (mauvaise ou déjà utilisée ailleurs) une autre de sa galerie
+        suspend fun add(c: Triple<String, String, Int>): Boolean {
+            if (c.second !in pics && c.second !in used && good(c.second)) { pics += c.second; return true }
+            val alt = pictures(c.first).let { l -> if (l.isEmpty()) l else l.drop(h % l.size) + l.take(h % l.size) }
+            for (u in alt) if (u !in pics && u !in used && good(u)) { pics += u; return true }
+            if (c.second !in pics && good(c.second)) { pics += c.second; return true }
+            return false
+        }
         if (fs.size > 1) for (k in fs.indices) { if (pics.size >= 2) break; for (c in ranked.filter { it.third == k || it.third == -1 }) if (add(c)) break }
         for (c in ranked) { if (pics.size >= 2) break; add(c) }
         // Repli : personnages populaires de l'œuvre
         suspend fun pickFrom(pool: List<String>, seed: Int): String? {
             if (pool.isEmpty()) return null
+            for (k in 0 until minOf(8, pool.size)) { val u = pool[(seed + k * 7) % pool.size]; if (u !in pics && u !in used && good(u)) return u }
             for (k in 0 until minOf(6, pool.size)) { val u = pool[(seed + k * 7) % pool.size]; if (u !in pics && good(u)) return u }
             return null
         }
         fs.forEachIndexed { k, f -> if (pics.size < 2) pickFrom(media(f).drop(1).map { it.second }, h / (k + 1))?.let { pics += it } }
         if (pics.size < 2) fs.firstOrNull()?.let { pickFrom(media(it).drop(1).map { p -> p.second }, h / 7 + 3) }?.let { pics += it }
+        used += pics
         return when { pics.size >= 2 -> "montage:" + pics.take(2).joinToString("|"); pics.size == 1 -> pics[0]; else -> null }
     }
 
