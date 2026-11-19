@@ -131,35 +131,53 @@ private fun SpiritFace(w: Work, width: Int) {
 }
 
 /**
- * Couverture montée : 2 ou 3 personnages en bandes inclinées, liseré, dégradé et titre en bas.
- * Chaque histoire a sa combinaison (personnages de ses tags et de ses fandoms).
+ * Couverture montée façon page de manga : personnage principal en plein cadre, cases inclinées liserées de blanc
+ * pour les autres, lignes de vitesse, bandeau des fandoms et titre en bas. Unique par histoire.
  */
 @Composable
 private fun Montage(w: Work, width: Int) {
     val urls = w.cover.removePrefix("montage:").split('|').filter { it.isNotBlank() }
     val accent = fandomColor(w.fandom)
-    Box(Modifier.fillMaxSize().background(Color(0xFF101014))) {
-        val n = urls.size.coerceAtLeast(1)
-        urls.forEachIndexed { i, u ->
-            // Bande i : parallélogramme incliné qui couvre 1/n de la largeur
-            val shape = androidx.compose.foundation.shape.GenericShape { sz, _ ->
-                val step = sz.width / n; val skew = sz.width * 0.18f
-                val x0 = step * i; val x1 = step * (i + 1)
-                moveTo(if (i == 0) 0f else x0 + skew / 2, 0f); lineTo(if (i == n - 1) sz.width else x1 + skew / 2, 0f)
-                lineTo(if (i == n - 1) sz.width else x1 - skew / 2, sz.height); lineTo(if (i == 0) 0f else x0 - skew / 2, sz.height); close()
-            }
-            Box(Modifier.fillMaxSize().clip(shape)) { NetFill(u, alignment = Alignment.TopCenter) }
-        }
-        // Liserés entre les bandes
+    val fandoms = fandomKey(w).removePrefix("Crossover : ").uppercase()
+    val flip = (w.id.hashCode() and 1) == 1 // mise en page miroir une fois sur deux
+    Box(Modifier.fillMaxSize().background(Color(0xFF0B0B10))) {
+        // 1. Personnage principal en plein cadre
+        urls.getOrNull(0)?.let { NetFill(it, alignment = Alignment.TopCenter) }
+        // Lignes de vitesse (manga)
         androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
-            val step = size.width / n; val skew = size.width * 0.18f
-            for (i in 1 until n) drawLine(accent, androidx.compose.ui.geometry.Offset(step * i + skew / 2, 0f), androidx.compose.ui.geometry.Offset(step * i - skew / 2, size.height), 3f)
+            val c = androidx.compose.ui.geometry.Offset(if (flip) size.width * 0.25f else size.width * 0.75f, size.height * 0.3f)
+            for (k in 0 until 28) {
+                val a = k * (Math.PI * 2 / 28).toFloat(); val r0 = size.maxDimension * 0.55f; val r1 = size.maxDimension * 1.2f
+                drawLine(Color.White.copy(alpha = 0.07f), c + androidx.compose.ui.geometry.Offset(kotlin.math.cos(a) * r0, kotlin.math.sin(a) * r0),
+                    c + androidx.compose.ui.geometry.Offset(kotlin.math.cos(a) * r1, kotlin.math.sin(a) * r1), 2f)
+            }
         }
-        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Transparent, Color.Black.copy(alpha = 0.85f)))))
+        // 2. Case inclinée en bas (2e personnage), liseré blanc
+        urls.getOrNull(1)?.let { u ->
+            val panel = androidx.compose.foundation.shape.GenericShape { sz, _ ->
+                if (flip) { moveTo(0f, sz.height * 0.48f); lineTo(sz.width * 0.62f, sz.height * 0.6f); lineTo(sz.width * 0.62f, sz.height); lineTo(0f, sz.height) }
+                else { moveTo(sz.width * 0.38f, sz.height * 0.6f); lineTo(sz.width, sz.height * 0.48f); lineTo(sz.width, sz.height); lineTo(sz.width * 0.38f, sz.height) }
+                close()
+            }
+            Box(Modifier.fillMaxSize().clip(panel).background(Color.White).padding(start = if (flip) 0.dp else 2.dp, end = if (flip) 2.dp else 0.dp, top = 2.dp)
+                .clip(panel)) { NetFill(u, alignment = Alignment.TopCenter) }
+        }
+        // 3. Petite case en médaillon (3e personnage)
+        urls.getOrNull(2)?.let { u ->
+            Box(Modifier.align(if (flip) Alignment.TopEnd else Alignment.TopStart).padding(top = 22.dp, start = 6.dp, end = 6.dp)
+                .size((width * 0.36f).dp).clip(CircleShape).background(Color.White).padding(2.dp).clip(CircleShape)) { NetFill(u) }
+        }
+        // Lumière colorée + assombrissement bas pour le titre
+        Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(accent.copy(alpha = 0.35f), Color.Transparent, Color.Transparent))))
+        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.55f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.92f))))
+        // Bandeau des fandoms
+        Text(fandoms, color = Color.White, fontSize = 6.sp, fontWeight = FontWeight.Black, letterSpacing = 1.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.align(Alignment.TopStart).fillMaxWidth().background(Color.Black.copy(alpha = 0.55f)).padding(horizontal = 6.dp, vertical = 3.dp))
         Column(Modifier.align(Alignment.BottomStart).padding(7.dp)) {
-            Box(Modifier.size(width = 18.dp, height = 2.dp).background(accent))
-            Text(w.title, color = Color.White, fontSize = (width / 9f).coerceIn(9f, 13f).sp, fontWeight = FontWeight.Black, maxLines = 3,
-                overflow = TextOverflow.Ellipsis, lineHeight = (width / 7.5f).coerceIn(11f, 16f).sp, modifier = Modifier.padding(top = 4.dp))
+            Box(Modifier.size(width = 20.dp, height = 2.dp).background(accent))
+            Text(w.title.uppercase(), color = Color.White, fontSize = (width / 10f).coerceIn(8f, 12f).sp, fontWeight = FontWeight.Black, maxLines = 3,
+                overflow = TextOverflow.Ellipsis, lineHeight = (width / 8f).coerceIn(10f, 15f).sp, letterSpacing = 0.5.sp, modifier = Modifier.padding(top = 4.dp))
+            if (w.author.isNotBlank()) Text(w.author, color = accent.copy(alpha = 0.95f), fontSize = 7.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
