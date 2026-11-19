@@ -41,6 +41,8 @@ data class Work(
 
 class Store(private val dir: File) {
     private val f = File(dir, "works.json")
+    /** Date de la dernière écriture (pour ne relire le fichier que s'il a changé). */
+    fun stamp() = f.lastModified()
     fun load(): List<Work> = runCatching { JSONArray(f.readText()).let { a -> (0 until a.length()).map { Work.from(a.getJSONObject(it)) } } }.getOrDefault(emptyList())
     fun save(list: List<Work>) = f.writeText(JSONArray(list.map { it.json() }).toString())
     fun text(id: String) = File(dir, "w_$id.html")

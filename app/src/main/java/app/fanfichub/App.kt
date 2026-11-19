@@ -59,7 +59,7 @@ class Hub(ctx: Context) {
     /** Chargement des fanfictions hors du fil principal (ouverture instantanée) ; la synchro l'attend. */
     private val loadJob = CoroutineScope(Dispatchers.Main.immediate).launch {
         val l = withContext(Dispatchers.IO) { runCatching { store.clearFr() }; runCatching { store.load() }.getOrDefault(emptyList()) }
-        works.addAll(l); refreshDupCovers(l)
+        works.addAll(l); lastStamp = store.stamp()
     }
     suspend fun awaitLoad() = loadJob.join()
     init { themeMode = prefs.getInt("themeMode", if (prefs.getBoolean("amoled", true)) 0 else 1) }
@@ -343,12 +343,23 @@ class Hub(ctx: Context) {
         }
     }
     /** Recharge depuis le disque (la synchro d'arrière-plan a pu écrire entre-temps). */
-    fun reload() { if (!syncing && loadJob.isCompleted) { val l = store.load(); if (l.isNotEmpty()) { works.clear(); works.addAll(l); refreshDupCovers(l) } } }
+    /** Relit les fiches seulement si la synchro de fond a modifié le fichier (lecture hors du fil principal). */
+    private var lastStamp = 0L
+    fun reload() {
+        if (syncing || !loadJob.isCompleted) return
+        scope.launch {
+            val st = withContext(Dispatchers.IO) { store.stamp() }
+            if (st <= lastStamp) return@launch
+            val l = withContext(Dispatchers.IO) { store.load() }
+            if (l.isNotEmpty() && !syncing) { works.clear(); works.addAll(l) }
+            lastStamp = st
+        }
+    }
     fun update(w: Work) { val i = works.indexOfFirst { it.id == w.id }; if (i >= 0) works[i] = w else works += w; persist() }
     private var saveJob: kotlinx.coroutines.Job? = null
     /** Écriture disque groupée et hors du fil principal (plus de saccades). */
-    fun persist() { saveJob?.cancel(); val snap = works.toList(); refreshDupCovers(snap); saveJob = scope.launch(Dispatchers.IO) { kotlinx.coroutines.delay(400); store.save(snap) } }
-    fun flush() { saveJob?.cancel(); store.save(works.toList()) }
+    fun persist() { saveJob?.cancel(); val snap = works.toList(); saveJob = scope.launch(Dispatchers.IO) { kotlinx.coroutines.delay(400); store.save(snap); lastStamp = store.stamp() } }
+    fun flush() { saveJob?.cancel(); store.save(works.toList()); lastStamp = store.stamp() }
     var downloaded by mutableStateOf(store.downloadedIds()); private set
     /** Toucher un volume de l'étagère : animation puis bibliothèque du site. */
     fun openSite(s: String) { if (bookAnim) intro = s else enterSite(s) }
