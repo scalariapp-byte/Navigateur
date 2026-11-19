@@ -487,11 +487,7 @@ fun Library(hub: Hub) {
                         val inLists = visible.sumOf { w -> w.sources.count { it != "Recherche" }.coerceAtLeast(1) }
                         Triple(visible.size, unique, inLists)
                     }
-                    Text(buildString {
-                        append("${fmtFull(stats.second)} fics")
-                        if (stats.third > stats.second) append(" · ${fmtFull(stats.third)} dans les listes, ${fmtFull(stats.third - stats.second)} doublons retirés")
-                        else if (stats.first > stats.second) append(" · ${fmtFull(stats.first - stats.second)} doublons retirés")
-                    }, color = Mut, fontSize = 13.sp, maxLines = 2)
+                    Text(fmtFull(stats.second), color = Mut, fontSize = 13.sp)
                 }
                 // Tri : bouton discret, les choix s'ouvrent au toucher
                 if (!selecting) Box {
