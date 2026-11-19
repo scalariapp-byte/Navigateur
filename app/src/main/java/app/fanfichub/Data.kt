@@ -173,7 +173,7 @@ object Ao3 {
             id, d.selectFirst("h2.title")?.text() ?: "Sans titre", d.select("h3.byline a[rel=author]").joinToString { it.text() }.ifEmpty { "Anonyme" },
             d.select("dd.fandom a.tag").map { it.text() }, d.selectFirst("dd.rating a.tag")?.text() ?: "",
             num(d.selectFirst("dl.stats dd.words")?.text()), ch, num(d.selectFirst("dl.stats dd.kudos")?.text()),
-            d.selectFirst("div.summary blockquote")?.text() ?: "", d.select("dd.freeform a.tag").map { it.text() }.take(14),
+            d.selectFirst("div.summary blockquote")?.text() ?: "", (d.select("dd.character a.tag").map { it.text() }.take(6) + d.select("dd.freeform a.tag").map { it.text() }).take(20),
             d.selectFirst("dl.stats dd.status")?.text() ?: d.selectFirst("dl.stats dd.published")?.text() ?: "", complete(ch), setOf(src),
         )
     }.getOrNull()

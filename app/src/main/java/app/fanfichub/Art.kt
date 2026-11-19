@@ -35,17 +35,45 @@ object Art {
         prefs.edit().putString(key, url).apply(); return url.ifBlank { null }
     }
 
-    /** Images d'une œuvre : affiche + 25 personnages les plus populaires (une seule requête, mise en cache). */
-    private val mem = HashMap<String, List<String>>()
-    private suspend fun media(name: String): List<String> {
-        val key = "M:" + name.lowercase()
+    /** Œuvre : affiche (nom vide) + 25 personnages les plus populaires (nom, image). Une requête, mise en cache. */
+    private val mem = HashMap<String, List<Pair<String, String>>>()
+    private suspend fun media(name: String): List<Pair<String, String>> {
+        val key = "M2:" + name.lowercase()
         mem[key]?.let { return it }
-        prefs.getString(key, null)?.let { s -> return s.split('\n').filter { it.isNotBlank() }.also { mem[key] = it } }
-        val m = gql("query(\$s:String){Media(search:\$s,type:ANIME){coverImage{extraLarge} characters(sort:FAVOURITES_DESC,perPage:25){nodes{image{large}}}}}", name)?.optJSONObject("Media")
-        val out = mutableListOf<String>()
-        m?.optJSONObject("coverImage")?.optString("extraLarge")?.takeIf { it.isNotBlank() }?.let { out += it }
-        m?.optJSONObject("characters")?.optJSONArray("nodes")?.let { a -> for (i in 0 until a.length()) a.getJSONObject(i).optJSONObject("image")?.optString("large")?.takeIf { it.isNotBlank() && "default" !in it }?.let { out += it } }
-        prefs.edit().putString(key, out.joinToString("\n")).apply(); mem[key] = out; return out
+        fun parse(s: String) = s.split('\n').filter { '\t' in it }.map { it.substringBefore('\t') to it.substringAfter('\t') }
+        prefs.getString(key, null)?.let { s -> return parse(s).also { mem[key] = it } }
+        val m = gql("query(\$s:String){Media(search:\$s,type:ANIME){coverImage{extraLarge} characters(sort:FAVOURITES_DESC,perPage:25){nodes{name{full} image{large}}}}}", name)?.optJSONObject("Media")
+        val out = mutableListOf<Pair<String, String>>()
+        m?.optJSONObject("coverImage")?.optString("extraLarge")?.takeIf { it.isNotBlank() }?.let { out += "" to it }
+        m?.optJSONObject("characters")?.optJSONArray("nodes")?.let { a -> for (i in 0 until a.length()) { val n = a.getJSONObject(i)
+            val img = n.optJSONObject("image")?.optString("large").orEmpty()
+            if (img.isNotBlank() && "default" !in img) out += n.optJSONObject("name")?.optString("full").orEmpty() to img } }
+        prefs.edit().putString(key, out.joinToString("\n") { it.first.replace('\t', ' ') + "\t" + it.second }).apply(); mem[key] = out; return out
+    }
+
+    private val STOP = setOf("the", "and", "von", "van", "der", "del", "les", "des")
+    private fun tokens(n: String) = n.lowercase().split(Regex("[^\\p{L}]+")).filter { it.length > 2 && it !in STOP }
+    private val ALIAS = mapOf("asl" to listOf("ace", "sabo", "luffy"))
+
+    /**
+     * Personnages principaux de l'histoire, du plus important au moins important : on note chaque personnage connu de
+     * l'œuvre selon sa présence dans le titre (fort), le résumé, les tags de personnages (ordre AO3 = importance) et
+     * les tags libres (« Protective Luffy »…).
+     */
+    private fun rank(w: Work, cands: List<Triple<String, String, Int>>): List<Triple<String, String, Int>> {
+        val title = w.title.lowercase(); val sum = w.summary.lowercase()
+        val aliasHits = ALIAS.filterKeys { Regex("\\b$it\\b").containsMatchIn(title) }.values.flatten().toSet()
+        fun count(text: String, t: String) = Regex("\\b${Regex.escape(t)}\\b").findAll(text).count()
+        return cands.map { c ->
+            val tk = tokens(c.first); var sc = 0.0
+            if (tk.isEmpty()) return@map c to 0.0
+            if (tk.any { count(title, it) > 0 }) sc += 8
+            if (tk.any { it in aliasHits }) sc += 6
+            sc += minOf(5, tk.maxOf { count(sum, it) }) * 2.0
+            w.tags.forEachIndexed { i, t -> val tl = t.lowercase()
+                if (tk.any { count(tl, it) > 0 }) sc += if (i < 6 && !Regex("[/&]").containsMatchIn(t) && tokens(t).all { x -> tk.any { it == x } || x.length < 4 }) 4.0 - i * 0.5 else 1.5 }
+            c to sc
+        }.filter { it.second > 0 }.sortedByDescending { it.second }.map { it.first }
     }
 
     /**
@@ -75,24 +103,30 @@ object Art {
         prefs.edit().putBoolean(key, ok).apply(); return ok
     }
 
-    /** Couverture montée : jusqu'à 3 images (personnages des tags, puis un par fandom), propres à l'histoire. */
+    /** Couverture montée : les 2 personnages principaux (un par fandom en crossover), sinon des personnages de l'œuvre. */
     suspend fun montage(w: Work): String? {
         val h = w.id.hashCode() and 0x7fffffff
         val pics = mutableListOf<String>()
-        for (t in w.tags.take(4)) {
-            if (pics.size >= 2) break
-            if (t.length > 40 || Regex("[/&:]").containsMatchIn(t)) continue
-            character(t.substringBefore(" (").trim())?.let { if (it !in pics && good(it)) pics += it }
-        }
         val fs = fandomKey(w).removePrefix("Crossover : ").split(" × ").map { it.trim() }.filter { it.isNotBlank() && it != "Sans fandom" }
-        // Une bonne image par fandom (on essaie plusieurs candidats si la première est mauvaise)
+        val cands = fs.flatMapIndexed { k, f -> media(f).drop(1).map { Triple(it.first, it.second, k) } }.toMutableList()
+        // Tags de personnages absents des 25 plus populaires : recherche directe
+        for (t in w.tags.take(4)) {
+            if (t.length > 40 || Regex("[/&:]").containsMatchIn(t)) continue
+            val tk = tokens(t); if (tk.isEmpty() || cands.any { c -> tokens(c.first).containsAll(tk) }) continue
+            character(t.substringBefore(" (").trim())?.let { cands += Triple(t.substringBefore(" (").trim(), it, -1) }
+        }
+        val ranked = rank(w, cands)
+        suspend fun add(c: Triple<String, String, Int>) = if (c.second !in pics && good(c.second)) { pics += c.second; true } else false
+        if (fs.size > 1) for (k in fs.indices) { if (pics.size >= 2) break; for (c in ranked.filter { it.third == k || it.third == -1 }) if (add(c)) break }
+        for (c in ranked) { if (pics.size >= 2) break; add(c) }
+        // Repli : personnages populaires de l'œuvre
         suspend fun pickFrom(pool: List<String>, seed: Int): String? {
             if (pool.isEmpty()) return null
             for (k in 0 until minOf(6, pool.size)) { val u = pool[(seed + k * 7) % pool.size]; if (u !in pics && good(u)) return u }
             return null
         }
-        fs.forEachIndexed { k, f -> if (pics.size < 2) pickFrom(media(f).drop(1), h / (k + 1))?.let { pics += it } }
-        if (pics.size < 2) fs.firstOrNull()?.let { pickFrom(media(it).drop(1), h / 7 + 3) }?.let { pics += it }
+        fs.forEachIndexed { k, f -> if (pics.size < 2) pickFrom(media(f).drop(1).map { it.second }, h / (k + 1))?.let { pics += it } }
+        if (pics.size < 2) fs.firstOrNull()?.let { pickFrom(media(it).drop(1).map { p -> p.second }, h / 7 + 3) }?.let { pics += it }
         return when { pics.size >= 2 -> "montage:" + pics.take(2).joinToString("|"); pics.size == 1 -> pics[0]; else -> null }
     }
 
@@ -104,7 +138,7 @@ object Art {
         }
         // Sinon une image différente pour chaque histoire parmi l'affiche et les personnages de l'œuvre
         val fs = fandomKey(w).removePrefix("Crossover : ").split(" × ").map { it.trim() }.filter { it.isNotBlank() && it != "Sans fandom" }
-        val pool = fs.flatMap { media(it) }
+        val pool = fs.flatMap { media(it).map { p -> p.second } }
         return if (pool.isEmpty()) null else pool[(w.id.hashCode() and 0x7fffffff) % pool.size]
     }
 }
