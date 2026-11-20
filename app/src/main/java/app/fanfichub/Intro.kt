@@ -207,11 +207,18 @@ fun BookIntro(site: String, counts: Map<String, Int>, onDone: () -> Unit) {
 /** Étagère de l'accueil : toujours visible ; toucher un volume le fait tomber puis ouvre le site. */
 @Composable
 fun ShelfStrip(hub: Hub) {
+    // Sites intégrés + extensions qui ont des histoires (Royal Road…) ; volumes plus fins s'ils sont nombreux
+    val books = remember(hub.works.size, Ext.installed.size) {
+        val all = BOOKS.filter { Ext.on(it.site) } + Ext.installed.filter { e -> hub.works.any { it.site == e.name } }
+            .mapIndexed { i, e -> BookSpec(e.name, 52, 200 + (i % 3) * 12) }
+        val k = if (all.size > 4) 4.2f / all.size else 1f
+        all.map { it.copy(w = (it.w * k).toInt().coerceAtLeast(38), h = it.h) }
+    }
     Box(Modifier.fillMaxWidth().height(300.dp).padding(top = 8.dp)) {
         Plank(Modifier.align(Alignment.BottomCenter).padding(horizontal = 18.dp))
         Row(Modifier.fillMaxWidth().align(Alignment.BottomCenter).padding(bottom = 34.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.Bottom) {
-            BOOKS.filter { Ext.on(it.site) }.forEach { b ->
+            horizontalArrangement = Arrangement.spacedBy(if (books.size > 4) 6.dp else 16.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.Bottom) {
+            books.forEach { b ->
                 Box(Modifier.clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { hub.openSite(b.site) }) {
                     MangaSpine(b.site, b.w, b.h, hub.works.count { it.site == b.site })
                 }
