@@ -475,7 +475,12 @@ class Hub(ctx: Context) {
     suspend fun sync(full: Boolean = false, only: String? = null, quick: Boolean = false) {
         awaitLoad()
         val now = System.currentTimeMillis()
-        fun fresh(w: Work) = quick && now - w.checked < 3 * 3_600_000L
+        // Fiche vérifiée récemment : inutile de la recharger (2 h en synchro auto, 3 h en rapide, 30 min en complète)
+        fun fresh(w: Work) = now - w.checked < when { quick -> 3 * 3_600_000L; full -> 30 * 60_000L; else -> 2 * 3_600_000L }
+        // Site entièrement synchronisé il y a moins de 30 min : la synchro complète ne le refait pas
+        fun doneAgo(n: String) = now - prefs.getLong("done:$n", 0)
+        fun recentlyDone(n: String) = full && doneAgo(n) < 30 * 60_000L
+        fun markDone(n: String) = prefs.edit().putLong("done:$n", System.currentTimeMillis()).apply()
         val u = user.takeIf { (only == null || only == "AO3") && Ext.on("AO3") }
         if (only != null && account(only) == null && works.none { it.site == only }) { syncInfo = "Configure d'abord ton compte $only"; return }
         if (u == null && users.isEmpty() && works.none { it.site != "AO3" }) { syncInfo = "Connecte un compte pour synchroniser"; return }
@@ -528,6 +533,7 @@ class Hub(ctx: Context) {
             // 5. Autres sites : bibliothèque du compte puis fanfictions suivies non terminées.
             Sites.all.filter { only == null || it.name == only }.map { s -> async {
                 val su = users[s.name]
+                if (su != null && recentlyDone(s.name)) { siteStatus[s.name] = "Déjà à jour (synchronisé il y a ${doneAgo(s.name) / 60000} min)"; return@async }
                 if (su != null) siteStatus[s.name] = "Synchro en cours…"
                 if (su != null) runCatching {
                     syncInfo = "${s.name} · bibliothèque…"; syncProgress = null
@@ -538,6 +544,7 @@ class Hub(ctx: Context) {
                     l.forEach { add(it); if (trusted) libIds += it.id }; publish()
                     if (SyncMode.quick) { siteStatus[s.name] = "${l.count { it.id !in old }} nouvelles · à jour"; return@runCatching }
                     if (!trusted) { siteStatus[s.name] = "Incomplet : ${l.size} reçues sur $known connues" + (if (s === Wattpad && Wattpad.listReport.isNotBlank()) " · ${Wattpad.listReport}" else "") + " (site qui freine ou compte déconnecté : reconnecte-toi si ça persiste)"; return@runCatching }
+                    markDone(s.name)
                     siteStatus[s.name] = "${l.size} fanfictions synchronisées" + (if (s === Wattpad && Wattpad.listReport.isNotBlank()) " · ${Wattpad.listReport}" else "")
                 }.onFailure { e -> siteStatus[s.name] = if (old.values.any { it.site == s.name }) "Synchro partielle : ${e.message}" else "Erreur : ${e.message}" }
                 // Détails : fiches encore incomplètes (« ?/? ») et fanfictions suivies non terminées.
@@ -565,7 +572,8 @@ class Hub(ctx: Context) {
                 publish()
             } }.awaitAll()
           }
-          if (u != null) {
+          if (u != null && recentlyDone("AO3")) siteStatus["AO3"] = "Déjà à jour (synchronisé il y a ${doneAgo("AO3") / 60000} min)"
+          else if (u != null) {
             // 1. Favoris triés par date de mise à jour de l'œuvre : tout ce qui suit une œuvre inchangée est inchangé.
             pages("/users/$u/bookmarks?bookmark_search%5Bsort_column%5D=bookmarkable_date", "Favori", 40) { l -> l.any { unchanged(it) } }
             // 2. Nouveaux favoris (tri par date d'ajout) jusqu'au premier déjà connu.
@@ -584,6 +592,7 @@ class Hub(ctx: Context) {
                             val inSeen = seen[id]; val known = inSeen ?: old[id]
                             val w: Work? = when {
                                 inSeen != null -> inSeen.copy(sources = setOf("Abonnement"))
+                                known != null && fresh(known) -> known.copy(sources = known.sources + "Abonnement")
                                 known != null && known.complete && !full -> known.copy(sources = known.sources + "Abonnement")
                                 known != null && !full && fresh(known) -> known.copy(sources = known.sources + "Abonnement")
                                 known != null && !full -> {
@@ -601,6 +610,7 @@ class Hub(ctx: Context) {
                 }.awaitAll()
             }
             publish()
+            markDone("AO3")
             siteStatus["AO3"] = "${seen.values.count { it.site == "AO3" }} fanfictions synchronisées"
           }
             others.await()
