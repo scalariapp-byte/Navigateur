@@ -92,7 +92,7 @@ class Hub(ctx: Context) {
         syncKind = if (full) "full" else "quick"
         syncJob = scope.launch { try { sync(full, only, quick) } finally { syncKind = null } }
     }
-    fun stopSync() { syncJob?.cancel(); syncJob = null; syncing = false; syncProgress = null; syncKind = null; syncInfo = "Synchro arrêtée" }
+    fun stopSync() { syncJob?.cancel(); syncJob = null; syncInfo = "Arrêt de la synchro…" }
     fun startUpdate() { scope.launch { doUpdate() } }
     fun startImport(url: String) { scope.launch { importUrl(url) } }
     private var lastCheck = 0L
@@ -481,8 +481,14 @@ class Hub(ctx: Context) {
         if (u == null && users.isEmpty() && works.none { it.site != "AO3" }) { syncInfo = "Connecte un compte pour synchroniser"; return }
         if (syncing) return
         // Une seule synchro à la fois dans tout le processus (app + synchro de fond) : SyncMode est partagé
-        if (!SyncLock.running.compareAndSet(false, true)) { syncInfo = "Synchro d'arrière-plan en cours, réessaie dans un instant"; return }
         syncing = true
+        // Une autre synchro tient le verrou (arrière-plan ou synchro qui s'arrête) : on attend son tour au lieu d'abandonner
+        var waited = 0
+        while (!SyncLock.running.compareAndSet(false, true)) {
+            syncInfo = "Attente de la synchro précédente (${waited}s)…"
+            kotlinx.coroutines.delay(1000); waited++
+            if (waited > 600) { syncing = false; syncInfo = "Une synchro bloquée empêche de relancer : ferme et rouvre l'app"; return }
+        }
         val old = works.associateBy { it.id }
         SyncMode.quick = quick && !full; SyncMode.known = old.keys
         val seen = LinkedHashMap<String, Work>()
@@ -606,7 +612,12 @@ class Hub(ctx: Context) {
         } } catch (e: Exception) {
             publish()
             syncInfo = "Synchro interrompue : ${e.message ?: "réseau indisponible"}"
-        } finally { SyncLock.running.set(false); syncing = false; syncProgress = null; fillArt(); prefetchCovers() }
+        } finally {
+            SyncLock.running.set(false); syncing = false; syncProgress = null
+            // Plus aucun site « en cours » une fois la synchro finie ou arrêtée
+            siteStatus.keys.toList().forEach { k -> if (siteStatus[k] == "Synchro en cours…") siteStatus[k] = "Interrompue (relance la synchro)" }
+            fillArt(); prefetchCovers()
+        }
     }
 
     /** Couvertures préchargées en arrière-plan : les étagères s'affichent sans attendre. */
@@ -667,11 +678,13 @@ class Hub(ctx: Context) {
 }
 
 class MainActivity : ComponentActivity() {
-    companion object { @Volatile var visible = false }
+    companion object { @Volatile var visible = false; @Volatile var alive = false }
+    override fun onDestroy() { super.onDestroy(); alive = false }
     override fun onStart() { super.onStart(); visible = true }
     override fun onStop() { super.onStop(); visible = false }
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
+        alive = true
         // Rapport de plantage : l'erreur est enregistrée puis affichée au lancement suivant.
         val crash = java.io.File(filesDir, "crash.txt")
         val prev = Thread.getDefaultUncaughtExceptionHandler()

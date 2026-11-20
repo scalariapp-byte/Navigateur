@@ -724,7 +724,8 @@ fun Accounts(hub: Hub) {
         if (page == "Synchronisation") Group("Synchronisation") {
             // État en direct : étape en cours + résultat par site
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
-                Text(if (hub.syncing) "En cours" else "À l'arrêt", color = if (hub.syncing) A1 else Mut, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text(if (hub.syncing) "En cours · " + when (hub.syncKind) { "full" -> "Synchronisation complète"; "quick" -> "Vérification des nouveautés"; else -> "synchro automatique" } else "À l'arrêt",
+                    color = if (hub.syncing) A1 else Mut, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 hub.syncInfo?.let { Text(it, color = Txt, fontSize = 14.sp, modifier = Modifier.padding(top = 2.dp)) }
                 if (hub.syncing) androidx.compose.material3.LinearProgressIndicator(
                     progress = { hub.syncProgress ?: 0f }, color = A1, trackColor = Surf2,

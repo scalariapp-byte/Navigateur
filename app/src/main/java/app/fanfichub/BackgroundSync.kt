@@ -24,7 +24,8 @@ class BackgroundSync(ctx: Context, p: WorkerParameters) : CoroutineWorker(ctx, p
         val ctx = applicationContext
         Web.app = ctx
         // App ouverte : c'est elle qui synchronise ; une 2e copie écraserait ses changements
-        if (MainActivity.visible || SyncLock.running.get()) return Result.success()
+        // App ouverte (ou simplement lancée dans ce processus) : c'est elle qui synchronise
+        if (MainActivity.visible || MainActivity.alive || SyncLock.running.get()) return Result.success()
         val hub = Hub(ctx)
         hub.awaitLoad()
         if (hub.works.isEmpty() && java.io.File(ctx.filesDir, "works.json").length() > 100) return Result.retry() // fichier illisible : ne rien écrire
