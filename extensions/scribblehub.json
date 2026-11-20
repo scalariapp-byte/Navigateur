@@ -3,18 +3,14 @@
   "name": "Scribble Hub",
   "logo": "SH",
   "color": "#5A9BD5",
-  "version": 4,
-  "search": "https://www.scribblehub.com/series-finder/?sf=1&search_name={q}&sort=ratings&order=desc&pg={page}",
+  "version": 5,
+  "search": "https://www.scribblehub.com/series-finder/?sf=1&seriescontains={q}&sort=ratings&order=desc&pg={page}",
   "item": ".search_main_box",
   "title": ".search_title a",
   "link": ".search_title a@href",
   "author": ".a_un_st a",
   "cover": ".search_img img@src",
   "summary": ".search_body",
-  "search1": "https://www.scribblehub.com/series-finder/?sf=1&search_name={q}&sort=ratings&order=desc",
-  "alt": [
-    "https://www.scribblehub.com/tag/{slug}/",
-    "https://www.scribblehub.com/series-finder/?sf=1&searchTitle={q}",
-    "https://www.scribblehub.com/?s={q}&post_type=fictionposts"
-  ]
+  "search1": "https://www.scribblehub.com/series-finder/?sf=1&seriescontains={q}&sort=ratings&order=desc",
+  "alt": []
 }
