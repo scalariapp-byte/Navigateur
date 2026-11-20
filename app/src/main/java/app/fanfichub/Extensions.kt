@@ -39,7 +39,16 @@ data class ExtDef(
     /** Recherche sur le site via le navigateur intégré (passe les protections anti-robot). */
     suspend fun search(q: String, page: Int): List<Work> {
         val url = search.replace("{q}", URLEncoder.encode(q.trim(), "UTF-8")).replace("{page}", "$page")
-        val d = Web.html(url, "ui")
+        var d = Web.html(url, "ui")
+        // Version mobile différente de la version ordinateur : on retente en mode ordinateur si rien n'est trouvé
+        if (d.select(item).isEmpty()) runCatching { Web.html(url, "pc") }.getOrNull()?.let { if (it.select(item).isNotEmpty()) d = it }
+        if (d.select(item).isEmpty()) {
+            val t = d.title().ifBlank { "page vide" }
+            if (Regex("(?i)just a moment|attention required|un instant|cloudflare|verify").containsMatchIn(t + d.text().take(300)))
+                error("$name demande une vérification anti-robot. Ouvre le site une fois dans l'app (Réglages › Extensions), puis réessaie.")
+            if (Regex("(?i)no results|nothing found|aucun|0 results").containsMatchIn(d.text())) return emptyList()
+            error("$name : page reçue « ${t.take(60)} » mais aucune histoire reconnue (extension à mettre à jour)")
+        }
         return d.select(item).mapNotNull { e ->
             val link = pick(e, link).ifBlank { return@mapNotNull null }
             val t = pick(e, title).ifBlank { return@mapNotNull null }
