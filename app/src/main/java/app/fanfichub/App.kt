@@ -227,68 +227,74 @@ class Hub(ctx: Context) {
     fun cancelDiag() { diagJob?.cancel(); diagRunning = false }
     fun runDiag(kind: String = "all") { if (diagRunning) { cancelDiag(); return }; diagRunning = true; diagKind = kind; diagJob = scope.launch {
         fun on(vararg k: String) = kind == "all" || kind in k
+        val diagStart = System.currentTimeMillis()
         val out = StringBuffer()
         fun log(s: String) { out.append(s).append('\n') }
         log("Diagnostic « ${DIAGS[kind] ?: kind} » · Fanfic Hub v$version · Android ${android.os.Build.VERSION.RELEASE} · ${android.os.Build.MODEL}")
         val ls = prefs.getLong("lastSync", 0)
         log("Dernière synchro complète : " + if (ls == 0L) "jamais" else "il y a ${(System.currentTimeMillis() - ls) / 60000} min" + if (syncing) " · synchro en cours" else "")
-        val reports = if (!on("sites")) emptyList() else Sites.all.map { site -> async(Dispatchers.IO) {
+        // Toutes les sections tournent EN MÊME TEMPS (rapport assemblé dans l'ordre) ; délais courts pour le diagnostic complet
+        val quick = kind == "all"
+        val T = if (quick) 12_000L else 30_000L
+        suspend fun <R> lim(ms: Long = T, f: suspend () -> R): R? = kotlinx.coroutines.withTimeoutOrNull(ms) { f() }
+        fun sec(cond: Boolean, f: suspend StringBuilder.() -> Unit) = if (!cond) null else async { val r = StringBuilder(); runCatching { r.f() }.onFailure { r.append("  ! ${it.message}\n") }; r.toString() }
+
+        val siteJobs = if (!on("sites")) emptyList() else Sites.all.map { site -> async(Dispatchers.IO) {
             val r = StringBuilder()
             val mine = works.filter { it.site == site.name }
             val noSum = mine.filter { it.summary.isBlank() }
-            r.append("\n== ${site.name} · dernière synchro : ${siteStatus[site.name] ?: "pas encore lancée depuis l'ouverture de l'app"}")
-            r.append("\n== ${site.name} · compte ${account(site.name) ?: "aucun"} · ${mine.size} fiches · sans résumé ${noSum.size} · sans couverture ${mine.count { !goodCover(it.cover) }} (vide ${mine.count { it.cover.isBlank() }}, doublon ${mine.count { it.cover.isNotBlank() && it.cover in dupCovers }}) · titres-identifiants ${mine.count { Regex("^[a-z0-9-]+-\\d+$").matches(it.title) }}\n")
-            noSum.take(2).forEach { w ->
+            r.append("\n== ${site.name} · compte ${account(site.name) ?: "aucun"} · synchro : ${siteStatus[site.name] ?: "pas lancée depuis l'ouverture"}\n")
+            r.append("  ${mine.size} fiches · sans résumé ${noSum.size} · sans couverture ${mine.count { !goodCover(it.cover) }} (vide ${mine.count { it.cover.isBlank() }}, doublon ${mine.count { it.cover.isNotBlank() && it.cover in dupCovers }}) · titres-identifiants ${mine.count { Regex("^[a-z0-9-]+-\\d+$").matches(it.title) }}\n")
+            noSum.take(if (quick) 1 else 2).forEach { w ->
                 val t0 = System.currentTimeMillis()
-                val inf = kotlinx.coroutines.withTimeoutOrNull(30_000) { runCatching { site.info(w.link, "ui") }.getOrElse { e -> r.append("  ! ${w.title.take(40)} : ${e.message}\n"); null } }
-                r.append("  • ${w.title.take(45)} (${System.currentTimeMillis() - t0} ms) → résumé « ${inf?.summary?.take(90) ?: "—"} »\n")
+                val inf = lim { runCatching { site.info(w.link, "ui") }.getOrElse { e -> r.append("  ! ${w.title.take(40)} : ${e.message}\n"); null } }
+                r.append("  • ${w.title.take(45)} (${System.currentTimeMillis() - t0} ms) → résumé « ${inf?.summary?.take(90) ?: "— (délai dépassé ou vide)"} »\n")
             }
-            account(site.name)?.let { u -> kotlinx.coroutines.withTimeoutOrNull(30_000) { runCatching { site.probe(u) }.getOrElse { "  ! sonde : ${it.message}" } }?.let { r.append(it).append('\n') } }
+            account(site.name)?.let { u -> (lim { runCatching { site.probe(u) }.getOrElse { "  ! sonde : ${it.message}" } } ?: "  ! sonde : délai dépassé (${T / 1000} s)").let { r.append(it).append('\n') } }
             r.toString()
-        } }.awaitAll()
-        reports.forEach { out.append(it) }
-        // AO3 et l'app elle-même
-        if (on("sites")) {
-        log("\n== AO3 · compte ${user ?: "aucun"} · ${siteStatus["AO3"] ?: "pas de synchro depuis l'ouverture"}")
-        works.filter { it.site == "AO3" }.let { a -> log("  ${a.size} fiches · sans résumé ${a.count { it.summary.isBlank() }} · nouveaux chapitres ${a.count { it.newChapters > 0 }}") }
-        user?.let { u -> val t0 = System.currentTimeMillis()
-            log("  test favoris : " + runCatching { withContext(Dispatchers.IO) { Ao3.page("/users/$u/bookmarks", "Favori").first.size } }.fold({ "$it fiches (${System.currentTimeMillis() - t0} ms)" }, { "ERREUR ${it.message}" })) }
+        } }
+        val ao3Job = sec(on("sites")) {
+            append("\n== AO3 · compte ${user ?: "aucun"} · ${siteStatus["AO3"] ?: "pas de synchro depuis l'ouverture"}\n")
+            works.filter { it.site == "AO3" }.let { a -> append("  ${a.size} fiches · sans résumé ${a.count { it.summary.isBlank() }} · nouveaux chapitres ${a.count { it.newChapters > 0 }}\n") }
+            user?.let { u -> val t0 = System.currentTimeMillis()
+                append("  test favoris : " + (lim { runCatching { withContext(Dispatchers.IO) { Ao3.page("/users/$u/bookmarks", "Favori").first.size } }.fold({ "$it fiches (${System.currentTimeMillis() - t0} ms)" }, { "ERREUR ${it.message}" }) } ?: "délai dépassé") + "\n") }
         }
-        if (on("app")) {
-        log("\n== App")
-        log("  version ${version} · dernière en ligne ${runCatching { Updater.latest() }.getOrNull() ?: "?"}")
-        log("  fiches : ${works.size} au total · " + works.groupingBy { it.site }.eachCount().entries.joinToString(" · ") { "${it.key} ${it.value}" })
-        log("  stockage : données ${app.filesDir.walkTopDown().sumOf { it.length() } / 1024} Ko · cache ${app.cacheDir.walkTopDown().sumOf { it.length() } / 1024} Ko")
-        val rt = Runtime.getRuntime()
-        log("  mémoire : ${(rt.totalMemory() - rt.freeMemory()) / 1048576} Mo utilisés / ${rt.maxMemory() / 1048576} Mo")
-        log("  WebView : ${runCatching { android.webkit.WebView.getCurrentWebViewPackage()?.versionName }.getOrNull() ?: "?"}")
+        val appJob = sec(on("app")) {
+            append("\n== App et bibliothèque\n")
+            append("  version $version · dernière en ligne ${lim(8000) { runCatching { Updater.latest() }.getOrNull() } ?: "?"}\n")
+            append("  fiches : ${works.size} au total · " + works.groupingBy { it.site }.eachCount().entries.joinToString(" · ") { "${it.key} ${it.value}" } + " · masquées ${hidden.size}\n")
+            append("  sauvegardes : " + backups().joinToString(" · ") { (f, n) -> f.name.removePrefix("works-bak-").removeSuffix(".json") + " ($n)" }.ifEmpty { "aucune encore" } + "\n")
+            withContext(Dispatchers.IO) { append("  stockage : données ${app.filesDir.walkTopDown().sumOf { it.length() } / 1024} Ko · cache ${app.cacheDir.walkTopDown().sumOf { it.length() } / 1024} Ko\n") }
+            val rt = Runtime.getRuntime()
+            append("  mémoire : ${(rt.totalMemory() - rt.freeMemory()) / 1048576} Mo utilisés / ${rt.maxMemory() / 1048576} Mo · WebView ${runCatching { android.webkit.WebView.getCurrentWebViewPackage()?.versionName }.getOrNull() ?: "?"}\n")
+            append(java.io.File(app.filesDir, "crash.txt").takeIf { it.exists() }?.let { "  DERNIER PLANTAGE :\n" + it.readText().take(600) + "\n" } ?: "  aucun plantage enregistré\n")
         }
-        if (on("read")) {
-        log("\n== Traduction et lecture")
-        val t1 = System.currentTimeMillis()
-        log("  traduction : " + runCatching { Translator.texts(listOf("Hello, the pirate king is here.")).first() }.fold({ "« $it » (${System.currentTimeMillis() - t1} ms)" }, { "ERREUR ${it.message}" }))
-        log("  réglages : traduction auto ${autoTr} · thème ${theme} · taille ${size} · animation ${bookAnim}")
+        val readJob = sec(on("read")) {
+            append("\n== Traduction et lecture\n")
+            val t1 = System.currentTimeMillis()
+            append("  traduction : " + (lim(10_000) { runCatching { Translator.texts(listOf("Hello, the pirate king is here.")).first() }.fold({ "« $it » (${System.currentTimeMillis() - t1} ms)" }, { "ERREUR ${it.message}" }) } ?: "délai dépassé") + "\n")
+            append("  réglages : traduction auto $autoTr · thème $theme · taille $size · animation $bookAnim\n")
         }
-        if (on("covers")) {
-        log("\n== Couvertures")
-        val t2 = System.currentTimeMillis()
-        log("  image de couverture : " + (works.firstOrNull { goodCover(it.cover) && !it.cover.startsWith("montage:") }?.let { w -> kotlinx.coroutines.withTimeoutOrNull(8000) { runCatching { Img.load(w.cover) }.getOrNull() }?.let { "chargée (${it.width}×${it.height}, ${System.currentTimeMillis() - t2} ms)" } ?: "échec ${w.cover.take(60)}" } ?: "aucune"))
-        Sites.all.map { it.name }.plus("AO3").distinct().forEach { n -> val m = works.filter { it.site == n }
-            if (m.isNotEmpty()) log("  $n : ${m.size} fiches · couverture valable ${m.count { goodCover(it.cover) }} · vide ${m.count { it.cover.isBlank() }} · doublon ${m.count { it.cover.isNotBlank() && it.cover in dupCovers }}") }
-        log("\n== Couvertures AO3 illustrées")
-        log("  calcul : $artLog")
-        log("  réseau : ${Art.probe()}")
-        works.filter { it.site == "AO3" }.let { a -> log("  ${a.size} fiches · montage ${a.count { it.cover.startsWith("montage:") }} · image seule ${a.count { it.cover.isNotBlank() && !it.cover.startsWith("montage:") }} · vides ${a.count { it.cover.isBlank() }}") }
-        works.filter { it.site == "AO3" }.sortedByDescending { (if ("luffy" in it.title.lowercase()) 2 else 0) + (if (isCrossover(it)) 1 else 0) }.take(if (kind == "covers") 8 else 3).forEach { w ->
-            out.append(runCatching { Art.explain(w) }.getOrElse { "  ! ${it.message}\n" }) }
+        val coverJob = sec(on("covers")) {
+            append("\n== Couvertures\n")
+            val t2 = System.currentTimeMillis()
+            append("  image test : " + (works.firstOrNull { goodCover(it.cover) && !it.cover.startsWith("montage:") }?.let { w -> lim(8000) { runCatching { Img.load(w.cover) }.getOrNull() }?.let { "chargée (${it.width}×${it.height}, ${System.currentTimeMillis() - t2} ms)" } ?: "échec ${w.cover.take(60)}" } ?: "aucune") + "\n")
+            (Sites.all.map { it.name } + "AO3" + Ext.installed.map { it.name }).distinct().forEach { n -> val m = works.filter { it.site == n }
+                if (m.isNotEmpty()) append("  $n : ${m.size} fiches · couverture valable ${m.count { goodCover(it.cover) }} · vide ${m.count { it.cover.isBlank() }} · doublon ${m.count { it.cover.isNotBlank() && it.cover in dupCovers }}\n") }
+            append("  AO3 illustrées : $artLog · réseau ${Art.probe()}\n")
+            works.filter { it.site == "AO3" }.let { a -> append("  ${a.size} fiches · montage ${a.count { it.cover.startsWith("montage:") }} · image seule ${a.count { it.cover.isNotBlank() && !it.cover.startsWith("montage:") }} · vides ${a.count { it.cover.isBlank() }}\n") }
+            works.filter { it.site == "AO3" }.sortedByDescending { (if ("luffy" in it.title.lowercase()) 2 else 0) + (if (isCrossover(it)) 1 else 0) }.take(if (quick) 3 else 8).forEach { w ->
+                append(runCatching { Art.explain(w) }.getOrElse { "  ! ${it.message}\n" }) }
         }
-        if (on("ext")) {
-            log("\n== Extensions")
-            log("  mise à jour : " + (runCatching { Ext.updateAll(); "vérifiée" }.getOrElse { "échec ${it.message}" }) + " · catalogue : " + Ext.catalog.joinToString { it.first })
-            if (Ext.installed.isEmpty()) log("  aucune extension installée")
-            Ext.installed.toList().forEach { e -> out.append(runCatching { e.diag() }.getOrElse { "  ! ${e.name} : ${it.message}\n" }) }
+        val extJob = sec(on("ext")) {
+            append("\n== Extensions\n")
+            append("  mise à jour : " + (lim(10_000) { runCatching { Ext.updateAll(); "vérifiée" }.getOrElse { "échec ${it.message}" } } ?: "délai dépassé") + " · catalogue : " + Ext.catalog.joinToString { it.first } + "\n")
+            if (Ext.installed.isEmpty()) append("  aucune extension installée\n")
+            Ext.installed.toList().map { e -> async { runCatching { e.diag(quick = quick) }.getOrElse { "  ! ${e.name} : ${it.message}\n" } } }.awaitAll().forEach { append(it) }
         }
-        if (on("app")) java.io.File(app.filesDir, "crash.txt").takeIf { it.exists() }?.let { log("  DERNIER PLANTAGE :\n" + it.readText().take(600)) } ?: log("  aucun plantage enregistré")
+        siteJobs.awaitAll().forEach { out.append(it) }
+        listOf(ao3Job, appJob, readJob, coverJob, extJob).forEach { j -> j?.await()?.let { out.append(it) } }
+        out.append("\n(diagnostic en ${(System.currentTimeMillis() - diagStart) / 1000} s)\n")
         diagRunning = false
         val txt = out.toString()
         runCatching { (app.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(android.content.ClipData.newPlainText("diag", txt)) }

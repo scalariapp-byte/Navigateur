@@ -47,13 +47,14 @@ data class ExtDef(
     }
 
     /** Diagnostic : chaque adresse de recherche testée (téléphone / ordinateur), page reçue et histoires reconnues. */
-    suspend fun diag(q: String = "dragon"): String {
+    suspend fun diag(q: String = "dragon", quick: Boolean = false): String {
         val r = StringBuilder("  $name v$version${if (post.isNotBlank()) " · POST $post" else ""}\n")
         fun fill(t: String, p: Int) = t.replace("{q}", URLEncoder.encode(q, "UTF-8")).replace("{slug}", slugOf(q)).replace("{page}", "$p")
         val urls = (listOf(search1.takeIf { it.isNotBlank() }?.let { fill(it, 1) }, fill(search, 1)) + alt.map { fill(it, 1) }).filterNotNull().distinct()
-        for (u in urls) for (lane in listOf("ui", "pc")) {
+        // Diagnostic complet : seulement l'adresse principale en mode téléphone (rapide) ; diagnostic Extensions : tout
+        for (u in if (quick) urls.take(1) else urls) for (lane in if (quick) listOf("ui") else listOf("ui", "pc")) {
             val t0 = System.currentTimeMillis()
-            val res = runCatching { kotlinx.coroutines.withTimeout(25_000) { fetch(u, lane, q, 1) } }
+            val res = runCatching { kotlinx.coroutines.withTimeout(if (quick) 15_000 else 25_000) { fetch(u, lane, q, 1) } }
             val d = res.getOrNull()
             if (d == null) { r.append("    ✕ [$lane] $u → ERREUR ${res.exceptionOrNull()?.message?.take(60)}\n"); continue }
             val n = d.select(item).size
