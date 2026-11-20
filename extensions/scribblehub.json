@@ -1,10 +1,19 @@
 {
-  "id": "scribblehub", "name": "Scribble Hub", "logo": "SH", "color": "#5A9BD5", "version": 2,
+  "id": "scribblehub",
+  "name": "Scribble Hub",
+  "logo": "SH",
+  "color": "#5A9BD5",
+  "version": 3,
   "search": "https://www.scribblehub.com/page/{page}/?s={q}&post_type=fictionposts",
   "item": ".search_main_box",
   "title": ".search_title a",
   "link": ".search_title a@href",
   "author": ".a_un_st a",
   "cover": ".search_img img@src",
-  "summary": ".search_body"
+  "summary": ".search_body",
+  "search1": "https://www.scribblehub.com/?s={q}&post_type=fictionposts",
+  "alt": [
+    "https://www.scribblehub.com/?s={q}&post_type=fictionposts&paged={page}",
+    "https://www.scribblehub.com/page/{page}/?s={q}"
+  ]
 }

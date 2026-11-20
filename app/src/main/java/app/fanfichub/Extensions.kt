@@ -19,13 +19,15 @@ data class ExtDef(
     val id: String, val name: String, val logo: String, val color: Long, val version: Int,
     val search: String, val item: String, val title: String, val link: String,
     val author: String, val cover: String, val summary: String, val raw: String,
+    val search1: String = "", val alt: List<String> = emptyList(), // 1re page sans pagination ; adresses de repli
 ) {
     companion object {
         fun parse(s: String): ExtDef = JSONObject(s).let { o ->
             ExtDef(o.getString("id"), o.getString("name"), o.optString("logo", o.getString("name").take(2)),
                 runCatching { android.graphics.Color.parseColor(o.optString("color", "#8E7CFF")).toLong() and 0xFFFFFFFFL }.getOrDefault(0xFF8E7CFFL),
                 o.optInt("version", 1), o.getString("search"), o.getString("item"), o.getString("title"), o.getString("link"),
-                o.optString("author"), o.optString("cover"), o.optString("summary"), s)
+                o.optString("author"), o.optString("cover"), o.optString("summary"), s,
+                o.optString("search1"), o.optJSONArray("alt")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList())
         }
     }
 
@@ -38,10 +40,15 @@ data class ExtDef(
 
     /** Recherche sur le site via le navigateur intégré (passe les protections anti-robot). */
     suspend fun search(q: String, page: Int): List<Work> {
-        val url = search.replace("{q}", URLEncoder.encode(q.trim(), "UTF-8")).replace("{page}", "$page")
-        var d = Web.html(url, "ui")
-        // Version mobile différente de la version ordinateur : on retente en mode ordinateur si rien n'est trouvé
-        if (d.select(item).isEmpty()) runCatching { Web.html(url, "pc") }.getOrNull()?.let { if (it.select(item).isNotEmpty()) d = it }
+        fun fill(t: String) = t.replace("{q}", URLEncoder.encode(q.trim(), "UTF-8")).replace("{page}", "$page")
+        // Adresse principale, puis les adresses de repli ; chacune en mode téléphone puis ordinateur
+        val urls = (listOf(if (page == 1 && search1.isNotBlank()) search1 else search) + alt).map(::fill).distinct()
+        var d = Web.html(urls[0], "ui")
+        outer@ for (u in urls) for (lane in listOf("ui", "pc")) {
+            if (u == urls[0] && lane == "ui") { if (d.select(item).isNotEmpty()) break@outer; continue }
+            val x = runCatching { Web.html(u, lane) }.getOrNull() ?: continue
+            if (x.select(item).isNotEmpty()) { d = x; break@outer }
+        }
         if (d.select(item).isEmpty()) {
             val t = d.title().ifBlank { "page vide" }
             if (Regex("(?i)just a moment|attention required|un instant|cloudflare|verify").containsMatchIn(t + d.text().take(300)))

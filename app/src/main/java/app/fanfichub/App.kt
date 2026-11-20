@@ -152,6 +152,7 @@ class Hub(ctx: Context) {
     private var searchPage = 1
     private var searchJob: kotlinx.coroutines.Job? = null
 
+    private var extChecked = false // extensions vérifiées (mise à jour) avant la 1re recherche
     fun runSearch(more: Boolean = false) {
         val q = query
         if (q.text.isBlank() && q.fandom.isBlank() && q.character.isBlank() && q.spirit.isEmpty()) return
@@ -191,7 +192,7 @@ class Hub(ctx: Context) {
                     "FanFiction.net" -> Ffn.searchStories(q.text, searchPage)
                     "Spirit Fanfics" -> Spirit.searchStories(q.text, searchPage, q.spirit.mapValues { it.value.first })
                     "AO3" -> withContext(Dispatchers.IO) { Ao3.search(q, searchPage) }
-                    else -> Ext.byName(q.site)?.search(q.text, searchPage) ?: emptyList()
+                    else -> { if (!extChecked) { extChecked = true; Ext.updateAll() }; Ext.byName(q.site)?.search(q.text, searchPage) ?: emptyList() }
                 }
                 // Filtres appliqués par l'app quand le site ne les propose pas
                 var list = raw.filter { w ->
