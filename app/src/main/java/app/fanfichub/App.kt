@@ -411,7 +411,7 @@ class Hub(ctx: Context) {
     fun persist() { saveJob?.cancel(); val snap = works.toList(); saveJob = scope.launch(Dispatchers.IO) { kotlinx.coroutines.delay(400); store.save(snap); lastStamp = store.stamp() } }
     /** Sauvegardes de la bibliothèque (une par jour) et restauration. */
     fun backups() = store.backups()
-    fun restoreBackup(file: java.io.File) { val l = store.loadFile(file); if (l.isNotEmpty()) { works.clear(); works.addAll(l); persist() } }
+    fun restoreBackup(file: java.io.File) { val l = store.loadFile(file); if (l.isNotEmpty()) { works.clear(); works.addAll(l); saveJob?.cancel(); scope.launch(Dispatchers.IO) { store.save(l, allowShrink = true); lastStamp = store.stamp() } } }
     fun flush() { saveJob?.cancel(); store.save(works.toList()); lastStamp = store.stamp() }
     var downloaded by mutableStateOf(store.downloadedIds()); private set
     /** Toucher un volume de l'étagère : animation puis bibliothèque du site. */
@@ -648,6 +648,9 @@ class Hub(ctx: Context) {
 }
 
 class MainActivity : ComponentActivity() {
+    companion object { @Volatile var visible = false }
+    override fun onStart() { super.onStart(); visible = true }
+    override fun onStop() { super.onStop(); visible = false }
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
         // Rapport de plantage : l'erreur est enregistrée puis affichée au lancement suivant.

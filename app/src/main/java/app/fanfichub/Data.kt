@@ -45,13 +45,20 @@ class Store(private val dir: File) {
     fun stamp() = f.lastModified()
     private fun parse(file: File): List<Work>? = runCatching { JSONArray(file.readText()).let { a -> (0 until a.length()).map { Work.from(a.getJSONObject(it)) } } }.getOrNull()
     /** Lecture : fichier principal, sinon la sauvegarde la plus récente (fichier abîmé par une coupure pendant l'écriture). */
-    fun load(): List<Work> = parse(f)?.takeIf { it.isNotEmpty() } ?: backupFiles().firstNotNullOfOrNull { b -> parse(b)?.takeIf { it.isNotEmpty() } } ?: emptyList()
+    fun load(): List<Work> = (parse(f)?.takeIf { it.isNotEmpty() } ?: backupFiles().firstNotNullOfOrNull { b -> parse(b)?.takeIf { it.isNotEmpty() } } ?: emptyList())
+        .also { if (it.size > lastCount) lastCount = it.size }
     /**
      * Écriture sûre : fichier temporaire puis remplacement d'un coup (jamais de fichier à moitié écrit si l'app est fermée
      * ou mise à jour pendant l'enregistrement). Une copie par jour est gardée (3 derniers jours).
      */
-    @Synchronized fun save(list: List<Work>) {
-        if (list.isEmpty() && f.length() > 100) return // ne jamais effacer la bibliothèque par accident
+    @Synchronized fun save(list0: List<Work>, allowShrink: Boolean = false) {
+        if (list0.isEmpty() && f.length() > 100) return // ne jamais effacer la bibliothèque par accident
+        // Garde-fou : la bibliothèque ne rétrécit jamais d'un coup (fiches masquées = conservées). Si une liste nettement plus
+        // petite arrive (fichier mal relu, synchro de fond partie d'une copie vide…), on garde aussi les fiches déjà enregistrées.
+        val list = if (!allowShrink && list0.size < lastCount * 9 / 10 && lastCount > 30)
+            (parse(f) ?: emptyList()).let { onDisk -> val ids = list0.map { it.id }.toHashSet(); list0 + onDisk.filter { it.id !in ids } }
+        else list0
+        lastCount = list.size
         val tmp = File(dir, "works.json.${System.nanoTime()}.tmp") // nom unique : app et synchro de fond ne partagent jamais le fichier temporaire
         tmp.writeText(JSONArray(list.map { it.json() }).toString())
         val day = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US).format(java.util.Date())
@@ -60,6 +67,7 @@ class Store(private val dir: File) {
         backupFiles().drop(3).forEach { it.delete() }
         if (!tmp.renameTo(f)) { f.delete(); tmp.renameTo(f) }
     }
+    @Volatile private var lastCount = 0
     /** Sauvegardes quotidiennes, de la plus récente à la plus ancienne. */
     fun backupFiles(): List<File> = dir.listFiles()?.filter { it.name.startsWith("works-bak-") && it.name.endsWith(".json") }?.sortedByDescending { it.name } ?: emptyList()
     fun backups(): List<Pair<File, Int>> = backupFiles().mapNotNull { b -> parse(b)?.let { b to it.size } }
