@@ -45,7 +45,9 @@ data class ExtDef(
         val urls = (listOf(search1.takeIf { it.isNotBlank() }?.let { fill(it, 1) }, fill(search, 1)) + alt.map { fill(it, 1) }).filterNotNull().distinct()
         for (u in urls) for (lane in listOf("ui", "pc")) {
             val t0 = System.currentTimeMillis()
-            val d = runCatching { kotlinx.coroutines.withTimeout(25_000) { Web.html(u, lane) } }.getOrElse { r.append("    ✕ [$lane] $u → ERREUR ${it.message?.take(60)}\n"); continue }
+            val res = runCatching { kotlinx.coroutines.withTimeout(25_000) { Web.html(u, lane) } }
+            val d = res.getOrNull()
+            if (d == null) { r.append("    ✕ [$lane] $u → ERREUR ${res.exceptionOrNull()?.message?.take(60)}\n"); continue }
             val n = d.select(item).size
             // Indices pour corriger les sélecteurs : classes des blocs qui contiennent des liens
             val hints = d.select("[class]").map { it.className().split(' ').first() }.filter { it.isNotBlank() && Regex("(?i)search|result|fic|story|series|item|title").containsMatchIn(it) }
