@@ -513,7 +513,7 @@ class Hub(ctx: Context) {
                     val trusted = !SyncMode.quick && (known < 20 || l.size >= known / 2)
                     l.forEach { add(it); if (trusted) libIds += it.id }; publish()
                     if (SyncMode.quick) { siteStatus[s.name] = "${l.count { it.id !in old }} nouvelles · à jour"; return@runCatching }
-                    if (!trusted) { siteStatus[s.name] = "Incomplet : ${l.size}/$known lues (le site freine), réessai à la prochaine synchro"; return@runCatching }
+                    if (!trusted) { siteStatus[s.name] = "Incomplet : ${l.size} reçues sur $known connues (site qui freine ou compte déconnecté : reconnecte-toi si ça persiste)"; return@runCatching }
                     siteStatus[s.name] = "${l.size} fanfictions synchronisées"
                 }.onFailure { e -> siteStatus[s.name] = if (old.values.any { it.site == s.name }) "Synchro partielle : ${e.message}" else "Erreur : ${e.message}" }
                 // Détails : fiches encore incomplètes (« ?/? ») et fanfictions suivies non terminées.
@@ -583,7 +583,8 @@ class Hub(ctx: Context) {
             if (only == null) prefs.edit().putLong("lastSync", System.currentTimeMillis()).apply()
             val mine = works.filter { only == null || it.site == only }
             val nw = mine.count { it.newChapters > 0 }
-            syncInfo = (only?.let { "$it · " } ?: "") + "${mine.size} fanfictions · " + if (nw == 0) "tout est à jour" else "$nw avec de nouveaux chapitres"
+            val bad = siteStatus.values.count { it.startsWith("Erreur") || it.startsWith("Incomplet") || it.startsWith("Synchro partielle") }
+            syncInfo = (only?.let { "$it · " } ?: "") + "${mine.size} fanfictions · " + when { bad > 0 -> "$bad site(s) à revoir"; nw == 0 -> "tout est à jour"; else -> "$nw avec de nouveaux chapitres" }
         } } catch (e: Exception) {
             publish()
             syncInfo = "Synchro interrompue : ${e.message ?: "réseau indisponible"}"

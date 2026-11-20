@@ -730,9 +730,11 @@ fun Accounts(hub: Hub) {
                     progress = { hub.syncProgress ?: 0f }, color = A1, trackColor = Surf2,
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp).height(3.dp).clip(CircleShape))
                 (listOf("AO3") + Sites.all.map { it.name }).forEach { n -> hub.siteStatus[n]?.let { st ->
-                    Row(Modifier.padding(top = 6.dp)) {
-                        Text(n, color = Mut, fontSize = 13.sp, modifier = Modifier.width(110.dp))
-                        Text(st, color = Txt, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    // Nom du site au-dessus de son état : le texte a toute la largeur (plus de ligne coupée)
+                    Column(Modifier.padding(top = 8.dp)) {
+                        Text(n, color = Mut, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Text(st, color = if (st.startsWith("Erreur") || st.startsWith("Incomplet") || st.startsWith("Synchro partielle")) Color(0xFFF59E0B) else Txt,
+                            fontSize = 13.sp, lineHeight = 17.sp)
                     } } }
             }
             Line()
