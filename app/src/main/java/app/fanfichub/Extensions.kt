@@ -101,6 +101,17 @@ object Ext {
         installed.removeAll { it.id == d.id }; installed.add(d); save(); null
     }.getOrElse { "Extension invalide : ${it.message}" }
 
+    /** Met à jour les extensions installées quand le dépôt publie une version plus récente (au lancement). */
+    suspend fun updateAll() = runCatching {
+        if (installed.isEmpty()) return@runCatching
+        refresh()
+        for (d in installed.toList()) {
+            val url = catalog.firstOrNull { it.first == d.name }?.second ?: continue
+            val n = runCatching { ExtDef.parse(get(url)) }.getOrNull() ?: continue
+            if (n.version > d.version) withContext(Dispatchers.Main) { val i = installed.indexOfFirst { it.id == d.id }; if (i >= 0) installed[i] = n; save() }
+        }
+    }
+
     fun uninstall(id: String) { installed.removeAll { it.id == id }; save() }
     fun addRepo(url: String) { val u = url.trim(); if (u.startsWith("http") && u !in repos) { repos.add(u); save() } }
     fun removeRepo(url: String) { repos.remove(url); save() }

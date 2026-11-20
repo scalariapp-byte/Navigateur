@@ -112,7 +112,8 @@ object Ao3 {
     /** Auto-complétion officielle d'AO3 (kind : fandom, character, relationship, freeform). */
     fun autocomplete(kind: String, term: String): List<String> = runCatching {
         val body = Jsoup.connect("$BASE/autocomplete/$kind?term=" + java.net.URLEncoder.encode(term.trim(), "UTF-8"))
-            .ignoreContentType(true).userAgent(UA).cookies(cookies()).timeout(15000).execute().body()
+            .ignoreContentType(true).userAgent(UA).cookies(cookies()).header("X-Requested-With", "XMLHttpRequest")
+            .header("Accept", "application/json, text/javascript, */*; q=0.01").referrer("$BASE/works/search").timeout(15000).execute().body()
         val a = JSONArray(body)
         (0 until a.length()).map { a.getJSONObject(it).optString("name").ifBlank { a.getJSONObject(it).optString("id") } }.filter { it.isNotBlank() }
     }.getOrDefault(emptyList())

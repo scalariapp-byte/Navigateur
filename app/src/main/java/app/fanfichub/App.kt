@@ -654,6 +654,7 @@ class MainActivity : ComponentActivity() {
         handle(intent)
         setContent { HubApp(hub) }
         runCatching { hub.prefetchCovers(); hub.fillArt() }
+        hub.scope.launch { Ext.updateAll() }
         BackgroundSync.schedule(this)
         if (android.os.Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED)
             requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)

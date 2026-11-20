@@ -1,6 +1,6 @@
 {
-  "id": "scribblehub", "name": "Scribble Hub", "logo": "SH", "color": "#5A9BD5", "version": 1,
-  "search": "https://www.scribblehub.com/?s={q}&post_type=fictionposts&paged={page}",
+  "id": "scribblehub", "name": "Scribble Hub", "logo": "SH", "color": "#5A9BD5", "version": 2,
+  "search": "https://www.scribblehub.com/page/{page}/?s={q}&post_type=fictionposts",
   "item": ".search_main_box",
   "title": ".search_title a",
   "link": ".search_title a@href",
