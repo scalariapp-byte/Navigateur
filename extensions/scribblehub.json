@@ -3,14 +3,14 @@
   "name": "Scribble Hub",
   "logo": "SH",
   "color": "#5A9BD5",
-  "version": 5,
-  "search": "https://www.scribblehub.com/series-finder/?sf=1&seriescontains={q}&sort=ratings&order=desc&pg={page}",
+  "version": 6,
+  "search": "https://www.scribblehub.com/series-finder/?sf=1&sort=ratings&order=desc&pg={page}",
   "item": ".search_main_box",
   "title": ".search_title a",
   "link": ".search_title a@href",
   "author": ".a_un_st a",
   "cover": ".search_img img@src",
   "summary": ".search_body",
-  "search1": "https://www.scribblehub.com/series-finder/?sf=1&seriescontains={q}&sort=ratings&order=desc",
-  "alt": []
+  "alt": [],
+  "post": "seriescontains={q}&series_text=&sort=ratings&order=desc"
 }

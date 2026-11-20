@@ -20,6 +20,7 @@ data class ExtDef(
     val search: String, val item: String, val title: String, val link: String,
     val author: String, val cover: String, val summary: String, val raw: String,
     val search1: String = "", val alt: List<String> = emptyList(), // 1re page sans pagination ; adresses de repli
+    val post: String = "", // corps envoyé en POST (formulaires qui ignorent les paramètres d'adresse)
 ) {
     companion object {
         fun parse(s: String): ExtDef = JSONObject(s).let { o ->
@@ -27,9 +28,12 @@ data class ExtDef(
                 runCatching { android.graphics.Color.parseColor(o.optString("color", "#8E7CFF")).toLong() and 0xFFFFFFFFL }.getOrDefault(0xFF8E7CFFL),
                 o.optInt("version", 1), o.getString("search"), o.getString("item"), o.getString("title"), o.getString("link"),
                 o.optString("author"), o.optString("cover"), o.optString("summary"), s,
-                o.optString("search1"), o.optJSONArray("alt")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList())
+                o.optString("search1"), o.optJSONArray("alt")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList(), o.optString("post"))
         }
     }
+
+    private suspend fun fetch(u: String, lane: String, q: String, page: Int): org.jsoup.nodes.Document =
+        if (post.isNotBlank()) Web.htmlPost(u, post.replace("{q}", URLEncoder.encode(q.trim(), "UTF-8")).replace("{page}", "$page"), lane) else Web.html(u, lane)
 
     /** « Dragon's Edge » → « dragons-edge » (adresses de tags). */
     private fun slugOf(q: String) = java.text.Normalizer.normalize(q.trim().lowercase(), java.text.Normalizer.Form.NFD).replace(Regex("\\p{M}"), "")
@@ -44,12 +48,12 @@ data class ExtDef(
 
     /** Diagnostic : chaque adresse de recherche testée (téléphone / ordinateur), page reçue et histoires reconnues. */
     suspend fun diag(q: String = "dragon"): String {
-        val r = StringBuilder("  $name v$version\n")
+        val r = StringBuilder("  $name v$version${if (post.isNotBlank()) " · POST $post" else ""}\n")
         fun fill(t: String, p: Int) = t.replace("{q}", URLEncoder.encode(q, "UTF-8")).replace("{slug}", slugOf(q)).replace("{page}", "$p")
         val urls = (listOf(search1.takeIf { it.isNotBlank() }?.let { fill(it, 1) }, fill(search, 1)) + alt.map { fill(it, 1) }).filterNotNull().distinct()
         for (u in urls) for (lane in listOf("ui", "pc")) {
             val t0 = System.currentTimeMillis()
-            val res = runCatching { kotlinx.coroutines.withTimeout(25_000) { Web.html(u, lane) } }
+            val res = runCatching { kotlinx.coroutines.withTimeout(25_000) { fetch(u, lane, q, 1) } }
             val d = res.getOrNull()
             if (d == null) { r.append("    ✕ [$lane] $u → ERREUR ${res.exceptionOrNull()?.message?.take(60)}\n"); continue }
             val n = d.select(item).size
@@ -77,10 +81,10 @@ data class ExtDef(
         fun fill(t: String) = t.replace("{q}", URLEncoder.encode(q.trim(), "UTF-8")).replace("{slug}", slugOf(q)).replace("{page}", "$page")
         // Adresse principale, puis les adresses de repli ; chacune en mode téléphone puis ordinateur
         val urls = (listOf(if (page == 1 && search1.isNotBlank()) search1 else search) + alt).map(::fill).distinct()
-        var d = Web.html(urls[0], "ui")
+        var d = fetch(urls[0], "ui", q, page)
         outer@ for (u in urls) for (lane in listOf("ui", "pc")) {
             if (u == urls[0] && lane == "ui") { if (d.select(item).isNotEmpty()) break@outer; continue }
-            val x = runCatching { Web.html(u, lane) }.getOrNull() ?: continue
+            val x = runCatching { fetch(u, lane, q, page) }.getOrNull() ?: continue
             if (x.select(item).isNotEmpty()) { d = x; break@outer }
         }
         if (d.select(item).isEmpty()) {

@@ -40,6 +40,8 @@ object Web {
 
     @SuppressLint("SetJavaScriptEnabled")
     suspend fun html(url: String, lane: String = "sync"): Document = Jsoup.parse(load(url, json = false, lane = lane), url)
+    /** Envoi d'un formulaire en POST (ex. « series finder » de Scribble Hub) via le vrai navigateur. */
+    suspend fun htmlPost(url: String, body: String, lane: String = "ui"): Document = Jsoup.parse(load(url, json = false, lane = lane, post = body), url)
 
     /** Texte brut de la page (réponses JSON des API), via le vrai navigateur et sa session. */
     suspend fun text(url: String, lane: String = "sync"): String = load(url, json = true, lane = lane)
@@ -47,8 +49,8 @@ object Web {
     // Une file (et un navigateur caché) par site pour la synchro : Spirit, FF.net et Wattpad ne s'attendent plus entre eux
     private fun laneFor(url: String, lane: String) = if (lane == "sync") "sync:" + (runCatching { java.net.URI(url).host }.getOrNull() ?: "") else lane
     private val busy = kotlinx.coroutines.sync.Semaphore(2)
-    private suspend fun load(url: String, json: Boolean, lane: String): String = busy.withPermit { loadIn(url, json, lane) }
-    private suspend fun loadIn(url: String, json: Boolean, lane: String): String = lane(laneFor(url, lane)).let { l -> l.lock.withLock {
+    private suspend fun load(url: String, json: Boolean, lane: String, post: String? = null): String = busy.withPermit { loadIn(url, json, lane, post) }
+    private suspend fun loadIn(url: String, json: Boolean, lane: String, post: String? = null): String = lane(laneFor(url, lane)).let { l -> l.lock.withLock {
         val raw = withContext(Dispatchers.Main) {
             val w = l.wv ?: WebView(app).apply { settings.javaScriptEnabled = true; settings.domStorageEnabled = true
                 if (lane == "pc") settings.userAgentString = DESKTOP_UA }.also { l.wv = it }
@@ -68,7 +70,7 @@ object Web {
                         override fun onPageFinished(v: WebView, u: String?) { if (cont.isActive && tries == 0) grab() }
                     }
                     cont.invokeOnCancellation { w.post { w.stopLoading() } }
-                    w.loadUrl(url)
+                    if (post != null) w.postUrl(url, post.toByteArray()) else w.loadUrl(url)
                 }
             }
         } ?: error("Le site ne répond pas")
