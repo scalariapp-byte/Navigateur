@@ -59,9 +59,13 @@ data class ExtDef(
             val paths = d.select("a[href]").mapNotNull { a -> runCatching { java.net.URI(a.absUrl("href")).path.trim('/').split('/').firstOrNull()?.takeIf { it.isNotBlank() } }.getOrNull() }
                 .groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.take(5).joinToString(", ") { "/${it.key}×${it.value}" }
             r.append("    ${if (n > 0) "✓" else "✕"} [$lane] $u (${System.currentTimeMillis() - t0} ms)\n      page « ${d.title().take(60)} » · ${d.location().take(90)} · « $item » : $n\n      classes : ${hints.ifEmpty { "—" }}\n      liens : $paths\n")
-            val fields = d.select("form input[name], form select[name]").filter { it.attr("type") !in listOf("hidden", "submit", "checkbox", "radio") }
-                .joinToString(", ") { it.attr("name") }.take(160)
-            if (fields.isNotBlank()) r.append("      champs du formulaire : $fields\n")
+            // Chaque formulaire : adresse d'envoi + tous ses champs (texte, listes, cases) avec un exemple de valeur
+            d.select("form").forEachIndexed { fi, f ->
+                val fs = f.select("input[name], select[name], textarea[name]").filter { it.attr("type") != "submit" }
+                    .map { e -> e.attr("name") + when { e.tagName() == "select" -> "[liste:" + e.select("option").take(2).joinToString("/") { it.attr("value") } + "]"; e.attr("type") in listOf("checkbox", "radio") -> "[case=" + e.attr("value") + "]"; e.attr("type") == "hidden" -> "[caché=" + e.attr("value").take(15) + "]"; else -> "[texte" + (e.attr("placeholder").takeIf { it.isNotBlank() }?.let { " « $it »" } ?: "") + "]" } }
+                    .distinct()
+                if (fs.isNotEmpty()) r.append("      formulaire ${fi + 1} → ${f.attr("method").ifBlank { "get" }} ${f.absUrl("action").ifBlank { "(même page)" }.take(70)} : ${fs.joinToString(", ").take(700)}\n")
+            }
             if (n > 0) r.append("      titres : " + d.select(item).take(4).joinToString(" | ") { pick(it, title).take(35) } + "\n")
             if (n > 0) d.select(item).first()?.let { e -> r.append("      1er résultat : titre « ${pick(e, title).take(50)} » · lien ${pick(e, link).take(70)}\n") }
         }
