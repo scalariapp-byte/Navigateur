@@ -81,7 +81,15 @@ class Hub(ctx: Context) {
         site = s; prefs.edit().putString("site", s).apply()
     }
     fun account(s: String) = if (s == "AO3") user else users[s]
-    fun startSync(full: Boolean = false, only: String? = null, quick: Boolean = false) { scope.launch { sync(full, only, quick) } }
+    /** Synchro lancée depuis l'écran : type affiché (« full » / « quick ») et possibilité de l'arrêter. */
+    var syncKind by mutableStateOf<String?>(null); private set
+    private var syncJob: kotlinx.coroutines.Job? = null
+    fun startSync(full: Boolean = false, only: String? = null, quick: Boolean = false) {
+        if (syncing) return
+        syncKind = if (full) "full" else "quick"
+        syncJob = scope.launch { try { sync(full, only, quick) } finally { syncKind = null } }
+    }
+    fun stopSync() { syncJob?.cancel(); syncJob = null; syncing = false; syncProgress = null; syncKind = null; syncInfo = "Synchro arrêtée" }
     fun startUpdate() { scope.launch { doUpdate() } }
     fun startImport(url: String) { scope.launch { importUrl(url) } }
     private var lastCheck = 0L

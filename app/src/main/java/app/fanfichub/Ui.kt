@@ -738,9 +738,13 @@ fun Accounts(hub: Hub) {
                     } } }
             }
             Line()
-            SettingRow({ RoundIcon(Icons.Default.Refresh) }, "Vérifier les nouveautés") { hub.startSync(quick = true) }
+            // Bouton de la synchro en cours : « En cours… » + toucher pour arrêter ; l'autre indique qu'il faut attendre
+            fun subOf(k: String) = when { hub.syncing && hub.syncKind == k -> "En cours… touche pour arrêter"; hub.syncing -> "Une synchro est déjà en cours"; else -> null }
+            SettingRow({ RoundIcon(Icons.Default.Refresh) }, "Vérifier les nouveautés", subOf("quick"), subColor = if (hub.syncKind == "quick") A1 else Mut) {
+                if (hub.syncing) { if (hub.syncKind == "quick" || hub.syncKind == null) hub.stopSync() } else hub.startSync(quick = true) }
             Line()
-            SettingRow({ RoundIcon(Icons.Default.Refresh, A2) }, "Synchronisation complète") { hub.startSync(full = true) }
+            SettingRow({ RoundIcon(Icons.Default.Refresh, A2) }, "Synchronisation complète", subOf("full"), subColor = if (hub.syncKind == "full") A1 else Mut) {
+                if (hub.syncing) { if (hub.syncKind == "full") hub.stopSync() } else hub.startSync(full = true) }
         }
         if (page == "Apparence") Group("Apparence") {
             Row(Modifier.padding(14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
