@@ -24,12 +24,14 @@ class BackgroundSync(ctx: Context, p: WorkerParameters) : CoroutineWorker(ctx, p
         val ctx = applicationContext
         Web.app = ctx
         // App ouverte : c'est elle qui synchronise ; une 2e copie écraserait ses changements
-        if (MainActivity.visible) return Result.success()
+        if (MainActivity.visible || SyncLock.running.get()) return Result.success()
         val hub = Hub(ctx)
         hub.awaitLoad()
         if (hub.works.isEmpty() && java.io.File(ctx.filesDir, "works.json").length() > 100) return Result.retry() // fichier illisible : ne rien écrire
         val before = hub.works.associate { it.id to it.newChapters }
         hub.sync()
+        // L'app a été ouverte pendant ce temps : c'est sa liste qui fait foi, on n'écrit rien
+        if (MainActivity.visible) return Result.success()
         hub.flush()
         val fresh = hub.works.filter { it.newChapters > (before[it.id] ?: 0) }
         if (fresh.isNotEmpty()) notify(ctx, fresh)

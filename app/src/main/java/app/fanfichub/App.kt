@@ -35,6 +35,9 @@ sealed interface Screen {
     data object Extensions : Screen
 }
 
+/** Verrou global : l'app et la synchro de fond ne synchronisent jamais en même temps. */
+object SyncLock { val running = java.util.concurrent.atomic.AtomicBoolean(false) }
+
 val DIAGS = linkedMapOf("all" to "Toute l'app", "covers" to "Couvertures", "sites" to "Sites et synchro", "read" to "Traduction et lecture", "app" to "App et stockage", "ext" to "Extensions")
 
 class Hub(ctx: Context) {
@@ -409,7 +412,12 @@ class Hub(ctx: Context) {
             val st = withContext(Dispatchers.IO) { store.stamp() }
             if (st <= lastStamp) return@launch
             val l = withContext(Dispatchers.IO) { store.load() }
-            if (l.isNotEmpty() && !syncing) { works.clear(); works.addAll(l) }
+            if (l.isNotEmpty() && !syncing) {
+                val mem = works.associateBy { it.id }
+                val disk = l.associateBy { it.id }
+                val out = l.map { d -> mem[d.id]?.let { m -> if (m.lastRead > d.lastRead || m.checked > d.checked) m else d } ?: d } + works.filter { it.id !in disk }
+                works.clear(); works.addAll(out)
+            }
             lastStamp = st
         }
     }
@@ -472,6 +480,8 @@ class Hub(ctx: Context) {
         if (only != null && account(only) == null && works.none { it.site == only }) { syncInfo = "Configure d'abord ton compte $only"; return }
         if (u == null && users.isEmpty() && works.none { it.site != "AO3" }) { syncInfo = "Connecte un compte pour synchroniser"; return }
         if (syncing) return
+        // Une seule synchro à la fois dans tout le processus (app + synchro de fond) : SyncMode est partagé
+        if (!SyncLock.running.compareAndSet(false, true)) { syncInfo = "Synchro d'arrière-plan en cours, réessaie dans un instant"; return }
         syncing = true
         val old = works.associateBy { it.id }
         SyncMode.quick = quick && !full; SyncMode.known = old.keys
@@ -481,7 +491,7 @@ class Hub(ctx: Context) {
         fun unchanged(w: Work) = old[w.id]?.let { it.chapters == w.chapters && it.updated == w.updated } == true
         fun publish() {
             val merged = LinkedHashMap<String, Work>()
-            old.values.filter { !(full && it.site == "AO3" && u != null) }.forEach { merged[it.id] = it }
+            old.values.forEach { merged[it.id] = it }
             seen.values.forEach { f ->
                 val o = old[f.id]
                 // Pas de « nouveaux chapitres » si l'ancienne fiche était fausse (page de connexion, titre-identifiant, 1 chapitre par défaut)
@@ -596,7 +606,7 @@ class Hub(ctx: Context) {
         } } catch (e: Exception) {
             publish()
             syncInfo = "Synchro interrompue : ${e.message ?: "réseau indisponible"}"
-        } finally { syncing = false; syncProgress = null; fillArt(); prefetchCovers() }
+        } finally { SyncLock.running.set(false); syncing = false; syncProgress = null; fillArt(); prefetchCovers() }
     }
 
     /** Couvertures préchargées en arrière-plan : les étagères s'affichent sans attendre. */
