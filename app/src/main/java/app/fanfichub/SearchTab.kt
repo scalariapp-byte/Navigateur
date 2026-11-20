@@ -109,7 +109,9 @@ fun SearchTab(hub: Hub) {
         delay(450)
         tagInfo = withContext(Dispatchers.IO) {
             val kinds = listOf("freeform" to "Tag", "character" to "Personnage", "relationship" to "Relation", "fandom" to "Fandom")
-            val all = kinds.flatMap { (k, l) -> Ao3.autocomplete(k, t).map { l to it } }
+            val got = kinds.map { (k, l) -> l to Ao3.autocompleteOrNull(k, t) }
+            if (got.all { it.second == null }) return@withContext null // AO3 n'a pas répondu : on n'affirme rien
+            val all = got.flatMap { (l, v) -> v.orEmpty().map { l to it } }
             val exact = all.firstOrNull { it.second.equals(t, true) || it.second.substringBefore(" (").equals(t, true) }
             when {
                 exact != null -> "✓ ${exact.first} existant : ${exact.second}"

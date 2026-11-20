@@ -59,6 +59,10 @@ data class ExtDef(
             val paths = d.select("a[href]").mapNotNull { a -> runCatching { java.net.URI(a.absUrl("href")).path.trim('/').split('/').firstOrNull()?.takeIf { it.isNotBlank() } }.getOrNull() }
                 .groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.take(5).joinToString(", ") { "/${it.key}×${it.value}" }
             r.append("    ${if (n > 0) "✓" else "✕"} [$lane] $u (${System.currentTimeMillis() - t0} ms)\n      page « ${d.title().take(60)} » · ${d.location().take(90)} · « $item » : $n\n      classes : ${hints.ifEmpty { "—" }}\n      liens : $paths\n")
+            val fields = d.select("form input[name], form select[name]").filter { it.attr("type") !in listOf("hidden", "submit", "checkbox", "radio") }
+                .joinToString(", ") { it.attr("name") }.take(160)
+            if (fields.isNotBlank()) r.append("      champs du formulaire : $fields\n")
+            if (n > 0) r.append("      titres : " + d.select(item).take(4).joinToString(" | ") { pick(it, title).take(35) } + "\n")
             if (n > 0) d.select(item).first()?.let { e -> r.append("      1er résultat : titre « ${pick(e, title).take(50)} » · lien ${pick(e, link).take(70)}\n") }
         }
         return r.toString()
