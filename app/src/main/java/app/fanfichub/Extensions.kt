@@ -31,6 +31,10 @@ data class ExtDef(
         }
     }
 
+    /** « Dragon's Edge » → « dragons-edge » (adresses de tags). */
+    private fun slugOf(q: String) = java.text.Normalizer.normalize(q.trim().lowercase(), java.text.Normalizer.Form.NFD).replace(Regex("\\p{M}"), "")
+        .replace("'", "").replace(Regex("[^a-z0-9]+"), "-").trim('-')
+
     private fun pick(e: Element, spec: String): String {
         if (spec.isBlank()) return ""
         val sel = spec.substringBefore('@').trim(); val attr = spec.substringAfter('@', "")
@@ -41,7 +45,7 @@ data class ExtDef(
     /** Diagnostic : chaque adresse de recherche testée (téléphone / ordinateur), page reçue et histoires reconnues. */
     suspend fun diag(q: String = "dragon"): String {
         val r = StringBuilder("  $name v$version\n")
-        fun fill(t: String, p: Int) = t.replace("{q}", URLEncoder.encode(q, "UTF-8")).replace("{page}", "$p")
+        fun fill(t: String, p: Int) = t.replace("{q}", URLEncoder.encode(q, "UTF-8")).replace("{slug}", slugOf(q)).replace("{page}", "$p")
         val urls = (listOf(search1.takeIf { it.isNotBlank() }?.let { fill(it, 1) }, fill(search, 1)) + alt.map { fill(it, 1) }).filterNotNull().distinct()
         for (u in urls) for (lane in listOf("ui", "pc")) {
             val t0 = System.currentTimeMillis()
@@ -50,9 +54,11 @@ data class ExtDef(
             if (d == null) { r.append("    ✕ [$lane] $u → ERREUR ${res.exceptionOrNull()?.message?.take(60)}\n"); continue }
             val n = d.select(item).size
             // Indices pour corriger les sélecteurs : classes des blocs qui contiennent des liens
-            val hints = d.select("[class]").map { it.className().split(' ').first() }.filter { it.isNotBlank() && Regex("(?i)search|result|fic|story|series|item|title").containsMatchIn(it) }
+            val hints = d.select("[class]").flatMap { it.classNames() }.filter { it.isNotBlank() && Regex("(?i)search|result|fic|story|series|item|title").containsMatchIn(it) }
                 .groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.take(6).joinToString(", ") { "${it.key}×${it.value}" }
-            r.append("    ${if (n > 0) "✓" else "✕"} [$lane] $u (${System.currentTimeMillis() - t0} ms)\n      page « ${d.title().take(60)} » · ${d.location().take(90)} · « $item » : $n\n      classes : ${hints.ifEmpty { "—" }}\n")
+            val paths = d.select("a[href]").mapNotNull { a -> runCatching { java.net.URI(a.absUrl("href")).path.trim('/').split('/').firstOrNull()?.takeIf { it.isNotBlank() } }.getOrNull() }
+                .groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.take(5).joinToString(", ") { "/${it.key}×${it.value}" }
+            r.append("    ${if (n > 0) "✓" else "✕"} [$lane] $u (${System.currentTimeMillis() - t0} ms)\n      page « ${d.title().take(60)} » · ${d.location().take(90)} · « $item » : $n\n      classes : ${hints.ifEmpty { "—" }}\n      liens : $paths\n")
             if (n > 0) d.select(item).first()?.let { e -> r.append("      1er résultat : titre « ${pick(e, title).take(50)} » · lien ${pick(e, link).take(70)}\n") }
         }
         return r.toString()
@@ -60,7 +66,7 @@ data class ExtDef(
 
     /** Recherche sur le site via le navigateur intégré (passe les protections anti-robot). */
     suspend fun search(q: String, page: Int): List<Work> {
-        fun fill(t: String) = t.replace("{q}", URLEncoder.encode(q.trim(), "UTF-8")).replace("{page}", "$page")
+        fun fill(t: String) = t.replace("{q}", URLEncoder.encode(q.trim(), "UTF-8")).replace("{slug}", slugOf(q)).replace("{page}", "$page")
         // Adresse principale, puis les adresses de repli ; chacune en mode téléphone puis ordinateur
         val urls = (listOf(if (page == 1 && search1.isNotBlank()) search1 else search) + alt).map(::fill).distinct()
         var d = Web.html(urls[0], "ui")
