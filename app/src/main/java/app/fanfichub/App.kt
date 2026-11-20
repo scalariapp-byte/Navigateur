@@ -537,8 +537,8 @@ class Hub(ctx: Context) {
                     val trusted = !SyncMode.quick && (known < 20 || l.size >= known / 2)
                     l.forEach { add(it); if (trusted) libIds += it.id }; publish()
                     if (SyncMode.quick) { siteStatus[s.name] = "${l.count { it.id !in old }} nouvelles · à jour"; return@runCatching }
-                    if (!trusted) { siteStatus[s.name] = "Incomplet : ${l.size} reçues sur $known connues (site qui freine ou compte déconnecté : reconnecte-toi si ça persiste)"; return@runCatching }
-                    siteStatus[s.name] = "${l.size} fanfictions synchronisées"
+                    if (!trusted) { siteStatus[s.name] = "Incomplet : ${l.size} reçues sur $known connues" + (if (s === Wattpad && Wattpad.listReport.isNotBlank()) " · ${Wattpad.listReport}" else "") + " (site qui freine ou compte déconnecté : reconnecte-toi si ça persiste)"; return@runCatching }
+                    siteStatus[s.name] = "${l.size} fanfictions synchronisées" + (if (s === Wattpad && Wattpad.listReport.isNotBlank()) " · ${Wattpad.listReport}" else "")
                 }.onFailure { e -> siteStatus[s.name] = if (old.values.any { it.site == s.name }) "Synchro partielle : ${e.message}" else "Erreur : ${e.message}" }
                 // Détails : fiches encore incomplètes (« ?/? ») et fanfictions suivies non terminées.
                 fun noSummary(w: Work) = w.summary.isBlank() && old[w.id]?.summary.isNullOrBlank() && !(quick && (old[w.id]?.let { now - it.checked < 3 * 3_600_000L } == true))

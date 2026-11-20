@@ -206,10 +206,12 @@ object Wattpad : Site {
 
     private fun enc(user: String) = URLEncoder.encode(user.trim().removePrefix("@"), "UTF-8")
 
-    private suspend fun lists(u: String): List<Pair<String, String>> {
-        val a = JSONObject(json("$B/api/v3/users/$u/lists?limit=100&fields=lists(id,name)")).optJSONArray("lists") ?: JSONArray()
-        return (0 until a.length()).map { a.getJSONObject(it).let { l -> l.get("id").toString() to l.optString("name").ifBlank { "Liste" } } }
+    private suspend fun lists(u: String): List<Triple<String, String, Int>> {
+        val a = JSONObject(json("$B/api/v3/users/$u/lists?limit=100&fields=lists(id,name,numStories)")).optJSONArray("lists") ?: JSONArray()
+        return (0 until a.length()).map { a.getJSONObject(it).let { l -> Triple(l.get("id").toString(), l.optString("name").ifBlank { "Liste" }, l.optInt("numStories", -1)) } }
     }
+    /** Bilan de la dernière lecture des listes (affiché dans Synchronisation et le diagnostic). */
+    @Volatile var listReport = ""
 
     private suspend fun listStories(id: String): List<JSONObject> {
         val out = mutableListOf<JSONObject>()
@@ -243,12 +245,19 @@ object Wattpad : Site {
             for (i in 0 until a.length()) put(work(a.getJSONObject(i)).copy(sources = setOf("Bibliothèque")))
         }
         coroutineScope {
-            // 3 listes à la fois : au-delà, Wattpad freine et des listes entières étaient perdues
-            // 2 listes à la fois, 3 essais par liste : Wattpad freine les rafales
+            // 2 listes à la fois ; une liste est « ratée » si elle renvoie bien moins que son nombre annoncé
             val gate = Semaphore(2)
-            suspend fun read(id: String): List<JSONObject> { repeat(3) { k -> runCatching { return listStories(id) }; kotlinx.coroutines.delay(2000L * (k + 1)) }; return emptyList() }
-            runCatching { lists(u) }.getOrDefault(emptyList()).map { (id, name) -> async { gate.withPermit { name to read(id) } } }
-                .awaitAll().forEach { (name, st) -> st.forEach { put(work(it).copy(sources = setOf("Liste : $name"))) } }
+            suspend fun read(id: String): List<JSONObject> { repeat(4) { k -> runCatching { return listStories(id) }; kotlinx.coroutines.delay(longArrayOf(3000, 8000, 15000, 25000)[k]) }; return emptyList() }
+            val all = runCatching { lists(u) }.getOrDefault(emptyList())
+            fun ok(want: Int, got: Int) = want <= 0 || got >= want * 8 / 10 || SyncMode.quick
+            val got = HashMap<String, List<JSONObject>>()
+            all.map { (id, _, _) -> async { gate.withPermit { id to read(id) } } }.awaitAll().forEach { (id, st) -> got[id] = st }
+            // 2e passage, une liste à la fois après une pause : Wattpad freine les rafales
+            val missed = all.filter { (id, _, want) -> !ok(want, got[id]?.size ?: 0) }
+            if (missed.isNotEmpty()) { kotlinx.coroutines.delay(20_000); for ((id, _, _) in missed) { val r = read(id); if (r.size > (got[id]?.size ?: 0)) got[id] = r; kotlinx.coroutines.delay(2500) } }
+            all.forEach { (id, name, _) -> got[id].orEmpty().forEach { put(work(it).copy(sources = setOf("Liste : $name"))) } }
+            val bad = all.filter { (id, _, want) -> !ok(want, got[id]?.size ?: 0) }
+            listReport = "listes lues ${all.size - bad.size}/${all.size}" + (if (bad.isNotEmpty()) " · incomplètes : " + bad.take(4).joinToString { (id, n, want) -> "$n ${got[id]?.size ?: 0}/$want" } else "")
         }
         return out.values.toList()
     }
@@ -374,6 +383,7 @@ object Wattpad : Site {
         }
         runCatching { lists(enc(user)).firstOrNull() }.getOrNull()?.let { (id, name) ->
             sb.append("  1re liste « $name » : ${runCatching { listStories(id).size }.getOrElse { -1 }} histoires lues\n") }
+        if (listReport.isNotBlank()) sb.append("  dernière synchro : $listReport\n")
         return sb.toString()
     }
 
