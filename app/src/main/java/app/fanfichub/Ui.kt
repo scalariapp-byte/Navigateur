@@ -326,6 +326,11 @@ fun Home(hub: Hub) {
             when (hub.tab) { 0 -> Feed(hub); 1 -> Library(hub); 2 -> SearchTab(hub); else -> Accounts(hub) }
         }
         Box(Modifier.fillMaxWidth().windowInsetsTopHeight(WindowInsets.statusBars).background(Bg))
+        // Zone de la barre du bas : bloque les touchers (plus de livre ouvert par erreur derrière le bouton) + léger fondu
+        Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+            .background(Brush.verticalGradient(listOf(Color.Transparent, Bg.copy(alpha = 0.85f), Bg)))
+            .navigationBarsPadding().height(92.dp)
+            .clickable(indication = null, interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }) { })
         BottomBar(hub, Modifier.align(Alignment.BottomCenter))
     }
 }
