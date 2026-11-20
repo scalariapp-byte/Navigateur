@@ -38,6 +38,24 @@ data class ExtDef(
         return if (attr.isEmpty()) el.text().trim() else el.absUrl(attr).ifBlank { el.attr(attr) }.trim()
     }
 
+    /** Diagnostic : chaque adresse de recherche testée (téléphone / ordinateur), page reçue et histoires reconnues. */
+    suspend fun diag(q: String = "dragon"): String {
+        val r = StringBuilder("  $name v$version\n")
+        fun fill(t: String, p: Int) = t.replace("{q}", URLEncoder.encode(q, "UTF-8")).replace("{page}", "$p")
+        val urls = (listOf(search1.takeIf { it.isNotBlank() }?.let { fill(it, 1) }, fill(search, 1)) + alt.map { fill(it, 1) }).filterNotNull().distinct()
+        for (u in urls) for (lane in listOf("ui", "pc")) {
+            val t0 = System.currentTimeMillis()
+            val d = runCatching { kotlinx.coroutines.withTimeout(25_000) { Web.html(u, lane) } }.getOrElse { r.append("    ✕ [$lane] $u → ERREUR ${it.message?.take(60)}\n"); continue }
+            val n = d.select(item).size
+            // Indices pour corriger les sélecteurs : classes des blocs qui contiennent des liens
+            val hints = d.select("[class]").map { it.className().split(' ').first() }.filter { it.isNotBlank() && Regex("(?i)search|result|fic|story|series|item|title").containsMatchIn(it) }
+                .groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.take(6).joinToString(", ") { "${it.key}×${it.value}" }
+            r.append("    ${if (n > 0) "✓" else "✕"} [$lane] $u (${System.currentTimeMillis() - t0} ms)\n      page « ${d.title().take(60)} » · ${d.location().take(90)} · « $item » : $n\n      classes : ${hints.ifEmpty { "—" }}\n")
+            if (n > 0) d.select(item).first()?.let { e -> r.append("      1er résultat : titre « ${pick(e, title).take(50)} » · lien ${pick(e, link).take(70)}\n") }
+        }
+        return r.toString()
+    }
+
     /** Recherche sur le site via le navigateur intégré (passe les protections anti-robot). */
     suspend fun search(q: String, page: Int): List<Work> {
         fun fill(t: String) = t.replace("{q}", URLEncoder.encode(q.trim(), "UTF-8")).replace("{page}", "$page")

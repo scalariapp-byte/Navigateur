@@ -35,7 +35,7 @@ sealed interface Screen {
     data object Extensions : Screen
 }
 
-val DIAGS = linkedMapOf("all" to "Toute l'app", "covers" to "Couvertures", "sites" to "Sites et synchro", "read" to "Traduction et lecture", "app" to "App et stockage")
+val DIAGS = linkedMapOf("all" to "Toute l'app", "covers" to "Couvertures", "sites" to "Sites et synchro", "read" to "Traduction et lecture", "app" to "App et stockage", "ext" to "Extensions")
 
 class Hub(ctx: Context) {
     private val app = ctx.applicationContext
@@ -281,6 +281,12 @@ class Hub(ctx: Context) {
         works.filter { it.site == "AO3" }.let { a -> log("  ${a.size} fiches · montage ${a.count { it.cover.startsWith("montage:") }} · image seule ${a.count { it.cover.isNotBlank() && !it.cover.startsWith("montage:") }} · vides ${a.count { it.cover.isBlank() }}") }
         works.filter { it.site == "AO3" }.sortedByDescending { (if ("luffy" in it.title.lowercase()) 2 else 0) + (if (isCrossover(it)) 1 else 0) }.take(if (kind == "covers") 8 else 3).forEach { w ->
             out.append(runCatching { Art.explain(w) }.getOrElse { "  ! ${it.message}\n" }) }
+        }
+        if (on("ext")) {
+            log("\n== Extensions")
+            log("  mise à jour : " + (runCatching { Ext.updateAll(); "vérifiée" }.getOrElse { "échec ${it.message}" }) + " · catalogue : " + Ext.catalog.joinToString { it.first })
+            if (Ext.installed.isEmpty()) log("  aucune extension installée")
+            Ext.installed.toList().forEach { e -> out.append(runCatching { e.diag() }.getOrElse { "  ! ${e.name} : ${it.message}\n" }) }
         }
         if (on("app")) java.io.File(app.filesDir, "crash.txt").takeIf { it.exists() }?.let { log("  DERNIER PLANTAGE :\n" + it.readText().take(600)) } ?: log("  aucun plantage enregistré")
         diagRunning = false
