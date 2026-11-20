@@ -403,6 +403,9 @@ class Hub(ctx: Context) {
     private var saveJob: kotlinx.coroutines.Job? = null
     /** Écriture disque groupée et hors du fil principal (plus de saccades). */
     fun persist() { saveJob?.cancel(); val snap = works.toList(); saveJob = scope.launch(Dispatchers.IO) { kotlinx.coroutines.delay(400); store.save(snap); lastStamp = store.stamp() } }
+    /** Sauvegardes de la bibliothèque (une par jour) et restauration. */
+    fun backups() = store.backups()
+    fun restoreBackup(file: java.io.File) { val l = store.loadFile(file); if (l.isNotEmpty()) { works.clear(); works.addAll(l); persist() } }
     fun flush() { saveJob?.cancel(); store.save(works.toList()); lastStamp = store.stamp() }
     var downloaded by mutableStateOf(store.downloadedIds()); private set
     /** Toucher un volume de l'étagère : animation puis bibliothèque du site. */

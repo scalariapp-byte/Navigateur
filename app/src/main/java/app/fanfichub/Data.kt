@@ -43,8 +43,27 @@ class Store(private val dir: File) {
     private val f = File(dir, "works.json")
     /** Date de la dernière écriture (pour ne relire le fichier que s'il a changé). */
     fun stamp() = f.lastModified()
-    fun load(): List<Work> = runCatching { JSONArray(f.readText()).let { a -> (0 until a.length()).map { Work.from(a.getJSONObject(it)) } } }.getOrDefault(emptyList())
-    fun save(list: List<Work>) = f.writeText(JSONArray(list.map { it.json() }).toString())
+    private fun parse(file: File): List<Work>? = runCatching { JSONArray(file.readText()).let { a -> (0 until a.length()).map { Work.from(a.getJSONObject(it)) } } }.getOrNull()
+    /** Lecture : fichier principal, sinon la sauvegarde la plus récente (fichier abîmé par une coupure pendant l'écriture). */
+    fun load(): List<Work> = parse(f)?.takeIf { it.isNotEmpty() } ?: backupFiles().firstNotNullOfOrNull { b -> parse(b)?.takeIf { it.isNotEmpty() } } ?: emptyList()
+    /**
+     * Écriture sûre : fichier temporaire puis remplacement d'un coup (jamais de fichier à moitié écrit si l'app est fermée
+     * ou mise à jour pendant l'enregistrement). Une copie par jour est gardée (3 derniers jours).
+     */
+    @Synchronized fun save(list: List<Work>) {
+        if (list.isEmpty() && f.length() > 100) return // ne jamais effacer la bibliothèque par accident
+        val tmp = File(dir, "works.json.${System.nanoTime()}.tmp") // nom unique : app et synchro de fond ne partagent jamais le fichier temporaire
+        tmp.writeText(JSONArray(list.map { it.json() }).toString())
+        val day = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US).format(java.util.Date())
+        val bak = File(dir, "works-bak-$day.json")
+        if (f.exists() && f.length() > 100 && !bak.exists() && parse(f) != null) f.copyTo(bak, overwrite = true)
+        backupFiles().drop(3).forEach { it.delete() }
+        if (!tmp.renameTo(f)) { f.delete(); tmp.renameTo(f) }
+    }
+    /** Sauvegardes quotidiennes, de la plus récente à la plus ancienne. */
+    fun backupFiles(): List<File> = dir.listFiles()?.filter { it.name.startsWith("works-bak-") && it.name.endsWith(".json") }?.sortedByDescending { it.name } ?: emptyList()
+    fun backups(): List<Pair<File, Int>> = backupFiles().mapNotNull { b -> parse(b)?.let { b to it.size } }
+    fun loadFile(file: File): List<Work> = parse(file) ?: emptyList()
     fun text(id: String) = File(dir, "w_$id.html")
     fun titles(id: String) = File(dir, "t_$id.txt")
     fun fr(id: String) = File(dir, "w_${id}_fr.html")

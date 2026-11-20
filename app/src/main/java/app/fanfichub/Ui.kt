@@ -764,6 +764,12 @@ fun Accounts(hub: Hub) {
                 trail = { if (hub.newVersion != null) FilterPill(hub.updating?.let { "${(it * 100).toInt()} %" } ?: "Mettre à jour", true) { hub.startUpdate() } }) {
                 if (hub.newVersion != null) hub.startUpdate() else hub.startCheck(manual = true)
             }
+            // Sauvegardes quotidiennes de la bibliothèque : restaurer en cas de perte
+            val baks = remember(hub.works.size) { hub.backups() }
+            baks.forEach { (f, n) ->
+                val d = f.name.removePrefix("works-bak-").removeSuffix(".json")
+                SettingRow({ RoundIcon(Icons.Default.Refresh) }, "Restaurer la sauvegarde du ${d.substring(6, 8)}/${d.substring(4, 6)}", "$n fanfictions · actuellement ${hub.works.size}") { hub.restoreBackup(f) }
+            }
             DIAGS.forEach { (k, label) ->
                 SettingRow({ RoundIcon(Icons.Default.Info) }, "Diagnostic · $label",
                     if (hub.diagRunning && hub.diagKind == k) "En cours… touche pour annuler" else if (hub.diagRunning) "Un autre diagnostic est en cours" else null) { if (!hub.diagRunning || hub.diagKind == k) hub.runDiag(k) }
